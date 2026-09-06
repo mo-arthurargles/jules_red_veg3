@@ -454,16 +454,9 @@ TYPE(ainfo_type),INTENT(IN OUT) :: ainfo
 !Local
 INTEGER :: l,n  ! Index variables.
 
-REAL :: frac_old(land_pts,nnpft)
-    ! PFT fraction prior to updating veg_state%frac below, i.e. before the
-    ! change in canopy area resulting from vegetation dynamics.
-
 !-----------------------------------------------------------------------------
 !end of header
 
-! Record the vegetation fraction prior to updating it below, for use in
-! weighting litter fluxes that occurred over the previous fraction.
-frac_old(:,:) = veg_state%frac(:,1:nnpft)
 
 veg_state%vegCpft(:,:)  = 0.0
 veg_state%lai_bal(:,:)  = 0.0

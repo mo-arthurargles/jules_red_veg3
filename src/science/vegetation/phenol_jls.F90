@@ -63,7 +63,7 @@ REAL(KIND=real_jlslsm) , INTENT(IN) ::                                         &
 !-----------------------------------------------------------------------------
 ! Optional Arguments with INTENT(IN)
 !-----------------------------------------------------------------------------
-REAL, INTENT(IN), OPTIONAL ::                                                  &
+REAL(KIND=real_jlslsm), INTENT(IN), OPTIONAL ::                                &
   lai_bal_red(land_pts)
     ! Balanced growth LAI from veg3.
 
