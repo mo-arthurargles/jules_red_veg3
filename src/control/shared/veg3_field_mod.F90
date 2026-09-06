@@ -211,7 +211,7 @@ RETURN
 END SUBROUTINE veg3_field_allocate
 
 !-------------------------------------------------------------------------------
-SUBROUTINE veg3_field_assoc(progs, ainfo)
+SUBROUTINE veg3_field_assoc(progs, ainfo, trifctl_data, trif_vars_data)
 
 ! Initial code to associate the veg3 and red fields to the rest of JULES
 ! This new routine moves out the pointers from veg3_set_fields to here
@@ -220,13 +220,21 @@ SUBROUTINE veg3_field_assoc(progs, ainfo)
 ! We still need to run with l_triffid, but this will need to be addressed in a
 ! future revision to allow for veg3 to run fully independently of the switch.
 
+! Note: trifctl_data and trif_vars_data are passed in as arguments (rather than
+! USE-associated from jules_fields_mod) because this module lives in
+! src/control/shared and must also build for the UM, where jules_fields_mod
+! (a standalone-only module) is not available.
+
 USE jules_vegetation_mod,     ONLY: l_triffid
-USE jules_fields_mod,         ONLY: trifctl_data, trif_vars_data
+USE trifctl,                  ONLY: trifctl_data_type
+USE trif_vars_mod,            ONLY: trif_vars_data_type
 
 IMPLICIT NONE
 
 TYPE(progs_type), INTENT(IN) :: progs
 TYPE(ainfo_type), INTENT(IN) :: ainfo
+TYPE(trifctl_data_type), INTENT(IN), TARGET :: trifctl_data
+TYPE(trif_vars_data_type), INTENT(IN), TARGET :: trif_vars_data
 ! End of header
 !-------------------------------------------------------------------------------
 IF (l_red .AND. l_triffid) THEN
