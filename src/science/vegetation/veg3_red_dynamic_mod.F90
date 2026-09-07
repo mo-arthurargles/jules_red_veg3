@@ -322,7 +322,7 @@ mort(mclass)
 !-----------------------------------------------------------------------------
 REAL, INTENT(OUT)    :: mort_litC
               !  Mortality/demographic litter for this PFT, normalised per
-              !  unit gridbox area, veg3_red_dynamics renormalises to 
+              !  unit gridbox area, veg3_red_dynamics renormalises to
               !  PFT canopy area. (kgC m-2 s-1)
 
 !-----------------------------------------------------------------------------
