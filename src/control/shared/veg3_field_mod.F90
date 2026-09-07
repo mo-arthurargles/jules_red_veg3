@@ -114,8 +114,8 @@ TYPE(red_state_type)   :: red_state
 PRIVATE
 
 !Expose routines
-PUBLIC :: veg3_field_init, veg3_field_allocate, veg3_field_assoc,              &
-          red_veg3_couple
+PUBLIC :: veg3_field_init, veg3_field_allocate, veg3_field_deallocate,         &
+          veg3_field_assoc, red_veg3_couple
 
 !Expose data
 PUBLIC :: veg_state, red_state
@@ -211,6 +211,51 @@ RETURN
 END SUBROUTINE veg3_field_allocate
 
 !-------------------------------------------------------------------------------
+
+SUBROUTINE veg3_field_deallocate()
+
+! Deallocates the veg_state and red_state POINTER components that were
+! allocated locally by veg3_field_allocate but which veg3_field_assoc later
+! re-associates onto external targets (e.g. progs, trif_vars_data and
+! trifctl_data fields). This must be called before that re-association is
+! done, otherwise the original local allocations become orphaned (leaked) -
+! this can be a significant leak for red_state%plantNumDensity in particular.
+!
+! Note: veg_state%phen and veg_state%npp_acc are deliberately NOT included
+! here. They are never re-associated in veg3_field_assoc and remain the
+! arrays allocated in veg3_field_allocate for the lifetime of the run.
+
+IMPLICIT NONE
+
+!End of header
+
+DEALLOCATE(veg_state%leafC)
+DEALLOCATE(veg_state%rootC)
+DEALLOCATE(veg_state%woodC)
+DEALLOCATE(veg_state%vegCpft)
+DEALLOCATE(veg_state%lai_bal)
+DEALLOCATE(veg_state%canht)
+DEALLOCATE(veg_state%lai)
+DEALLOCATE(veg_state%npp_dr_out)
+DEALLOCATE(veg_state%frac)
+DEALLOCATE(veg_state%g_leaf_phen)
+DEALLOCATE(veg_state%g_leaf)
+DEALLOCATE(veg_state%lai_phen)
+DEALLOCATE(veg_state%g_leaf_acc)
+DEALLOCATE(veg_state%g_leaf_phen_acc)
+DEALLOCATE(veg_state%leaf_litC)
+DEALLOCATE(veg_state%root_litC)
+DEALLOCATE(veg_state%wood_litC)
+DEALLOCATE(veg_state%litCpft)
+DEALLOCATE(veg_state%litC)
+DEALLOCATE(veg_state%vegC)
+
+DEALLOCATE(red_state%plantNumDensity)
+
+RETURN
+END SUBROUTINE veg3_field_deallocate
+
+!-------------------------------------------------------------------------------
 SUBROUTINE veg3_field_assoc(progs, ainfo, trifctl_data, trif_vars_data)
 
 ! Initial code to associate the veg3 and red fields to the rest of JULES
@@ -238,6 +283,11 @@ TYPE(trif_vars_data_type), INTENT(IN), TARGET :: trif_vars_data
 ! End of header
 !-------------------------------------------------------------------------------
 IF (l_red .AND. l_triffid) THEN
+
+  ! Deallocate the local pointer targets set up in veg3_field_allocate before
+  ! they are re-associated onto external targets below, to avoid leaking the
+  ! original allocations (see veg3_field_deallocate for details).
+  CALL veg3_field_deallocate()
 
   ! Set pointers to the prognostic fields
   ! Note: veg_state%phen is not associated to an external target here - it is

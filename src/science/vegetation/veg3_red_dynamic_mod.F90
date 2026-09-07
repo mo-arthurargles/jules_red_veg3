@@ -139,7 +139,7 @@ DO l = 1,land_pts
       veg_state%mort_litC(l,n)                                                 &
       )
 
-      ! Divide mort_litC by the PFT fraction (not restimated yet)
+      ! Divide mort_litC by the PFT fraction (not re-estimated yet)
     IF (veg_state%frac(l,n) > 0.0) THEN
       veg_state%mort_litC(l,n) = veg_state%mort_litC(l,n) /                    &
         veg_state%frac(l,n)
@@ -322,7 +322,8 @@ mort(mclass)
 !-----------------------------------------------------------------------------
 REAL, INTENT(OUT)    :: mort_litC
               !  Mortality/demographic litter for this PFT, normalised per
-              !  unit PFT canopy area. (kgC m-2 s-1)
+              !  unit gridbox area, veg3_red_dynamics renormalises to 
+              !  PFT canopy area. (kgC m-2 s-1)
 
 !-----------------------------------------------------------------------------
 !Local Vars
