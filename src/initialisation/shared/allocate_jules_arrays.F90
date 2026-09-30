@@ -253,7 +253,7 @@ CALL trif_vars_alloc(land_pts,                                                 &
                      l_triffid, l_phenol, trif_vars_data)
 
 CALL veg3_parm_allocate(land_pts,nsurft,nnpft,npft)
-CALL veg3_field_allocate(land_pts,nsurft,nnpft,nmasst)
+CALL veg3_field_allocate(land_pts,nsurft,nnpft,nmasst,nnpft*nmasst)
 
 CALL urban_param_alloc(land_pts,                                               &
                        l_urban2t, l_moruses, urban_param_data)

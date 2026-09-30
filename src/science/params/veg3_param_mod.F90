@@ -22,7 +22,7 @@ IMPLICIT NONE
 
 TYPE :: veg3_ctrl_type
   INTEGER :: land_pts,nsurft,npft,nnpft,soil,triffid_period,nstep_trif,nmasst, &
-             phenol_period,nstep_phen
+             phenol_period,nstep_phen,npft_totmclass
   REAL    :: timestep,frac_min,dt_red,dt_phen_360d
 END TYPE veg3_ctrl_type
 
@@ -53,7 +53,14 @@ TYPE :: red_parm_type
     phi_l(:),                                                                  &
     comp_coef(:,:),                                                            &
     frac_min(:),                                                               &
-    mclass_geom_mult(:)
+    mclass_geom_mult(:),                                                       &
+    k_cai(:),                                                                  &
+              ! PFT crown overlap coefficient used to determine the total
+              ! PFT canopy area / vegetation fraction. (-)
+    frac_excl(:)
+              ! Vegetation fraction reserved for other PFTs' minimum
+              ! fraction, i.e. SUM(frac_min) excluding this PFT's own
+              ! frac_min. (-)
 END TYPE red_parm_type
 
 TYPE(veg3_ctrl_type)   :: veg3_ctrl
@@ -140,6 +147,8 @@ ALLOCATE(red_parms%phi_l              (nnpft))
 ALLOCATE(red_parms%frac_min           (nnpft))
 ALLOCATE(red_parms%comp_coef          (nnpft,nnpft))
 ALLOCATE(red_parms%mclass_geom_mult   (nnpft))
+ALLOCATE(red_parms%k_cai              (nnpft))
+ALLOCATE(red_parms%frac_excl          (nnpft))
 
 ! Allocate soil_parm_type
 ALLOCATE(soil_parms%dzsoil(dim_cslayer))
@@ -164,6 +173,8 @@ red_parms%phi_l              = rmdi
 red_parms%frac_min           = rmdi
 red_parms%comp_coef          = rmdi
 red_parms%mclass_geom_mult   = rmdi
+red_parms%k_cai              = rmdi
+red_parms%frac_excl          = rmdi
 
 soil_parms%dzsoil             = rmdi
 
@@ -183,7 +194,8 @@ USE jules_vegetation_mod,     ONLY: l_triffid, triffid_period,frac_min,        &
 
 USE red_io,                   ONLY: alpha_recrt, crwn_area0, dom_order,        &
                                     height0, lai_bal0, mass0, massi, mclass,   &
-                                    mort_base, phi_a, phi_g, phi_h, phi_l
+                                    mort_base, phi_a, phi_g, phi_h, phi_l,     &
+                                    k_cai
 !Get the timestep length
 USE timestep_mod,             ONLY: timestep
 USE conversions_mod,          ONLY: rsec_per_day
@@ -240,6 +252,7 @@ IF (l_red .AND. l_triffid) THEN
   veg3_ctrl%nnpft    = nnpft
   veg3_ctrl%npft     = npft
   veg3_ctrl%nmasst   = nmasst
+  veg3_ctrl%npft_totmclass = nnpft * nmasst
   veg3_ctrl%soil     = soil
   veg3_ctrl%frac_min = frac_min
 
@@ -264,6 +277,7 @@ IF (l_red .AND. l_triffid) THEN
   red_parms%phi_l(:)            = phi_l(1:nnpft)
   red_parms%mclass_geom_mult(:) = 1.0 ! Default assumes 1 mass class
   red_parms%frac_min(:)         = frac_min
+  red_parms%k_cai(:)            = k_cai(1:nnpft)
 
   red_parms%comp_coef(:,:)      = 0.0
 
@@ -283,6 +297,11 @@ IF (l_red .AND. l_triffid) THEN
       END IF
 
     END DO
+
+    ! Reserve space for every other PFT's own minimum vegetation fraction,
+    ! so that a dominant PFT cannot grow to exclude its competitors.
+    red_parms%frac_excl(n) = SUM(red_parms%frac_min(:)) - red_parms%frac_min(n)
+
   END DO
 
   ! Soil carbon coupling parameters
@@ -329,6 +348,7 @@ SUBROUTINE check_jules_red_parms()
 USE ereport_mod,     ONLY: ereport
 USE jules_print_mgr, ONLY: jules_print, jules_message
 USE jules_soil_biogeochem_mod, ONLY: soil_model_4pool, soil_bgc_model
+USE ancil_info,      ONLY: nmasst
 
 IMPLICIT NONE
 
@@ -383,6 +403,10 @@ IF ( l_red ) THEN
     error_sum = error_sum + 1
     CALL jules_print(RoutineName, "No value for mclass")
   END IF
+  IF ( ANY( red_parms%mclass(:) > nmasst ) ) THEN
+    error_sum = error_sum + 1
+    CALL jules_print(RoutineName, "mclass exceeds nmasst")
+  END IF
   IF ( ANY( red_parms%mort_base(:) < 0 ) ) THEN
     error_sum = error_sum + 1
     CALL jules_print(RoutineName, "No value for mort_base")
@@ -402,6 +426,10 @@ IF ( l_red ) THEN
   IF ( ANY( red_parms%phi_l(:) < 0 ) ) THEN
     error_sum = error_sum + 1
     CALL jules_print(RoutineName, "No value for phi_l")
+  END IF
+  IF ( ANY( red_parms%k_cai(:) < 0 ) ) THEN
+    error_sum = error_sum + 1
+    CALL jules_print(RoutineName, "No value for k_cai")
   END IF
 END IF
 

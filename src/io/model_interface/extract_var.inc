@@ -12,6 +12,8 @@ USE jules_fields_mod, ONLY: crop_vars, psparms, toppdm, fire_vars, ainfo,      &
                             trifctltype, jules_vars, fluxes, forcing,          &
                             lake_vars, chemvars, rivers, water_resources
 
+USE veg3_field_mod, ONLY: veg_state
+
   !Use subroutines
 ! TYPE Definitions
 USE imgn_drive_mod, ONLY: imgn_drive
@@ -1430,6 +1432,10 @@ CASE ( 'lit_n_orig' )
 
 CASE ( 'npp_dr_out' )
   cube_land = cube_from_array(trifctltype%npp_dr_out_pft)
+  cube = map_from_land(cube_land)
+
+CASE ( 'cai' )
+  cube_land = cube_from_array(veg_state%CAI)
   cube = map_from_land(cube_land)
 
 CASE ( 'npp' )

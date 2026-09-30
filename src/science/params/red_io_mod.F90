@@ -12,6 +12,9 @@ MODULE red_io
 USE max_dimensions, ONLY: npft_max
 USE missing_data_mod, ONLY: imdi, rmdi
 USE um_types, ONLY: real_jlslsm
+! nmasst is read as part of the JULES_RED namelist (it must be known before the
+! veg3/RED arrays are allocated - see the early read of this namelist in init).
+USE ancil_info, ONLY: nmasst
 
 IMPLICIT NONE
 
@@ -41,7 +44,10 @@ REAL(KIND=real_jlslsm) ::                                                      &
   phi_a(npft_max) = rmdi,                                                      &
   phi_g(npft_max) = rmdi,                                                      &
   phi_h(npft_max) = rmdi,                                                      &
-  phi_l(npft_max) = rmdi
+  phi_l(npft_max) = rmdi,                                                      &
+  k_cai(npft_max) = rmdi
+              ! PFT crown overlap coefficient used to determine the total PFT
+              ! canopy area / vegetation fraction. (-)
 
 !-----------------------------------------------------------------------
 ! Set up a namelist for reading and writing these arrays
@@ -49,7 +55,7 @@ REAL(KIND=real_jlslsm) ::                                                      &
 NAMELIST  / jules_red /                                                        &
                       alpha_recrt, crwn_area0, dom_order,  height0, lai_bal0,  &
                       mass0, massi, mclass, mort_base, phi_a, phi_g, phi_h,    &
-                      phi_l
+                      phi_l, k_cai, nmasst
 
 CHARACTER(LEN=*), PARAMETER, PRIVATE :: ModuleName='RED_IO'
 
@@ -87,6 +93,10 @@ CALL jules_print('red_io',lineBuffer)
 WRITE(lineBuffer,*)' phi_h = ',phi_h
 CALL jules_print('red_io',lineBuffer)
 WRITE(lineBuffer,*)' phi_l = ',phi_l
+CALL jules_print('red_io',lineBuffer)
+WRITE(lineBuffer,*)' k_cai = ',k_cai
+CALL jules_print('red_io',lineBuffer)
+WRITE(lineBuffer,*)' nmasst = ',nmasst
 CALL jules_print('red_io',lineBuffer)
 CALL jules_print('red_io',                                                     &
     '- - - - - - end of namelist - - - - - -')
@@ -126,13 +136,14 @@ CHARACTER(LEN=errormessagelength) :: iomessage
 
 ! set number of each type of variable in my_namelist type
 INTEGER, PARAMETER :: no_of_types = 2
-INTEGER, PARAMETER :: n_int = 2 * npft_max
-INTEGER, PARAMETER :: n_real = 11 * npft_max
+INTEGER, PARAMETER :: n_int = 2 * npft_max + 1
+INTEGER, PARAMETER :: n_real = 12 * npft_max
 
 TYPE :: my_namelist
   SEQUENCE
   INTEGER :: mclass(npft_max)
   INTEGER :: dom_order(npft_max)
+  INTEGER :: nmasst
   REAL(KIND=real_jlslsm) :: alpha_recrt(npft_max)
   REAL(KIND=real_jlslsm) :: crwn_area0(npft_max)
   REAL(KIND=real_jlslsm) :: height0(npft_max)
@@ -144,6 +155,7 @@ TYPE :: my_namelist
   REAL(KIND=real_jlslsm) :: phi_g(npft_max)
   REAL(KIND=real_jlslsm) :: phi_h(npft_max)
   REAL(KIND=real_jlslsm) :: phi_l(npft_max)
+  REAL(KIND=real_jlslsm) :: k_cai(npft_max)
 END TYPE my_namelist
 
 TYPE (my_namelist) :: my_nml
@@ -174,6 +186,8 @@ IF (mype == 0) THEN
   my_nml % phi_g       = phi_g
   my_nml % phi_h       = phi_h
   my_nml % phi_l       = phi_l
+  my_nml % k_cai       = k_cai
+  my_nml % nmasst      = nmasst
 
 END IF
 
@@ -194,6 +208,8 @@ IF (mype /= 0) THEN
   phi_g       = my_nml % phi_g
   phi_h       = my_nml % phi_h
   phi_l       = my_nml % phi_l
+  k_cai       = my_nml % k_cai
+  nmasst      = my_nml % nmasst
 
 END IF
 

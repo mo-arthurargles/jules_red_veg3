@@ -9367,4 +9367,17 @@ DATA metadata(723) / var_metadata(                                             &
 ! Units
     "kg m-2 s-1"                                                               &
   ) /
+!-----------------------------------------------------------------------------
+! Metadata for cai
+!-----------------------------------------------------------------------------
+DATA metadata(724) / var_metadata(                                             &
+! String identifier
+    'cai',                                                                     &
+! Variable type
+    var_type_pft,                                                              &
+! Long name
+    "PFT crown area index (CAI), diagnosed from the RED model",                &
+! Units
+    "m2 m-2"                                                                   &
+  ) /
 #endif

@@ -49,6 +49,7 @@ USE model_time_mod,               ONLY: is_spinup
 USE init_grid_mod,                ONLY: init_grid
 USE init_ancillaries_mod,         ONLY: init_ancillaries
 USE init_params_mod,              ONLY: init_params
+USE init_red_mod,                 ONLY: init_red_dims
 USE init_ic_mod,                  ONLY: init_ic
 USE spinup_init_mod,              ONLY: spinup_init
 USE write_dump_mod,               ONLY: write_dump
@@ -312,6 +313,11 @@ CALL init_urban(nml_dir)
 
 ! Initialise science fixes
 CALL init_science_fixes(nml_dir)
+
+! Read the JULES_RED namelist now (nmasst must be known before the veg3/RED
+! arrays are sized below by init_grid/allocate_jules_arrays). The rest of RED
+! parameter processing happens later, in init_params/init_red.
+CALL init_red_dims(nml_dir)
 
 ! Initialise the input, model and output grids **also allocates arrays**
 CALL init_grid(nml_dir, crop_vars_data,psparms_data,top_pdm_data,              &

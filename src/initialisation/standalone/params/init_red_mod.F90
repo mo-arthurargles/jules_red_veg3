@@ -22,17 +22,45 @@ MODULE init_red_mod
 IMPLICIT NONE
 
 PRIVATE
-PUBLIC init_red
+PUBLIC init_red_dims, init_red
 
 CONTAINS
+
+!-----------------------------------------------------------------------------
+SUBROUTINE init_red_dims(nml_dir)
+!-----------------------------------------------------------------------------
+! Reads just the JULES_RED namelist (in particular nmasst), which must be
+! known before the veg3/RED arrays are sized by allocate_jules_arrays/
+! init_grid. The rest of RED parameter processing (which depends on other
+! namelists, e.g. soil/pft/triffid, read later) happens in init_red below.
+
+USE jules_vegetation_mod, ONLY: l_red
+
+USE red_io, ONLY: read_nml_jules_red, print_nlist_jules_red
+
+IMPLICIT NONE
+
+CHARACTER(LEN=*), INTENT(IN) :: nml_dir  ! The directory containing the
+                                         ! namelists
+
+!-----------------------------------------------------------------------------
+! Nothing to do if red is not selected.
+!-----------------------------------------------------------------------------
+IF ( .NOT. l_red ) RETURN
+
+CALL read_nml_jules_red(nml_dir)
+
+CALL print_nlist_jules_red()
+
+RETURN
+
+END SUBROUTINE init_red_dims
 
 !-----------------------------------------------------------------------------
 SUBROUTINE init_red(nml_dir,land_pts,nsurft,nnpft,npft,nmasst)
 !-----------------------------------------------------------------------------
 
 USE jules_vegetation_mod, ONLY: l_red
-
-USE red_io, ONLY: read_nml_jules_red, print_nlist_jules_red
 
 USE veg3_parm_mod, ONLY: veg3_parm_init, check_jules_red_parms
 
@@ -53,12 +81,9 @@ CHARACTER(LEN=*), INTENT(IN) :: nml_dir  ! The directory containing the
 IF ( .NOT. l_red ) RETURN
 
 !-----------------------------------------------------------------------------
-! Read red parameters namelist
+! The JULES_RED namelist has already been read by init_red_dims, before the
+! veg3/RED arrays were allocated.
 !-----------------------------------------------------------------------------
-CALL read_nml_jules_red(nml_dir)
-
-CALL print_nlist_jules_red()
-
 CALL veg3_parm_init(land_pts,nsurft,nnpft,npft,nmasst)
 
 CALL check_jules_red_parms()

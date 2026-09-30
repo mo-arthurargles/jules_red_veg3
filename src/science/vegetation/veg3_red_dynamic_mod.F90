@@ -41,6 +41,7 @@ SUBROUTINE veg3_red_dynamic(                                                   &
 !Only get the data structures - the data comes through the calling tree
 USE veg3_parm_mod,ONLY:  red_parm_type, veg3_ctrl_type
 USE veg3_field_mod,ONLY:  veg_state_type, red_state_type
+USE veg3_canopy_mod,ONLY: veg3_canopy_frac, veg3_canopy_maintain_frac_min
 
 IMPLICIT NONE
 
@@ -80,8 +81,11 @@ P_s(land_pts,nnpft),                                                           &
 g0(land_pts,nnpft),                                                            &
               !  Boundary growth for an individual member of the smallest mass
               !  cohort. (kgC s-1)
-frac_shade(land_pts,nnpft)
+frac_shade(land_pts,nnpft),                                                    &
               !  Competitive shading of seedlings in each PFT. (-)
+frac_above_mclass1(land_pts,nnpft)
+              !  frac_above at the moment each PFT's lowest mass class was
+              !  processed (see veg3_canopy_frac).
 
 
 !End of headers
@@ -92,8 +96,8 @@ P_s(:,:)                    = 0.0
 g0(:,:)                     = 0.0
 frac_shade(:,:)             = 0.0
 
-! Dynamic demographic loop to update the number density of each PFT across the
-! PFT mass classes.
+! Pass 1: update each PFT's size structure (growth/mortality) independently.
+! mort_litC remains gridbox-normalised at this point.
 DO l = 1,land_pts
   DO n = 1,nnpft
     ! Call to partition the PFT growth onto the mass class structure.
@@ -124,14 +128,13 @@ DO l = 1,land_pts
       !IN Control vars
       dt,                                                                      &
       !IN PFT parameters
-      red_parms%mort_base(n),red_parms%frac_min(n),                            &
+      red_parms%mort_base(n),                                                  &
       !IN fields
       mort_add(l,n,1:red_parms%mclass(n)),growth(l,n),                         &
       P_s(l,n),g0(l,n),frac_shade(l,n),                                        &
       !IN mass-cohort properties
       red_state%g_mass_scale(n,1:red_parms%mclass(n)),                         &
       red_state%mass_mass(n,1:red_parms%mclass(n)),                            &
-      red_state%crwn_area_mass(n,1:red_parms%mclass(n)),                       &
       !INOUT state
       red_state%plantNumDensity(l,n,1:red_parms%mclass(n)),                    &
       red_state%mort(l,n,1:red_parms%mclass(n)),                               &
@@ -139,14 +142,34 @@ DO l = 1,land_pts
       veg_state%mort_litC(l,n)                                                 &
       )
 
-      ! Divide mort_litC by the PFT fraction (not re-estimated yet)
+  END DO
+END DO
+
+! Pass 2: enforce each PFT's minimum vegetation fraction using the
+! overlap-corrected frac across all PFTs, debiting the implied recruitment
+! from mort_litC (still gridbox-normalised - see item 8).
+CALL veg3_canopy_frac(land_pts, nnpft, nmasst, veg3_ctrl%npft_totmclass,       &
+  red_state%order_pft_desc, red_state%order_mclass_desc, red_parms%k_cai,      &
+  red_parms%frac_excl, veg_state%frac_tile_excl, red_state%crwn_area_mass,     &
+  red_state%plantNumDensity, red_state%frac_mass, red_state%CAI_mass,          &
+  red_state%CAI_overlapped, veg_state%frac(:,1:nnpft), veg_state%CAI,          &
+  frac_above_mclass1)
+
+CALL veg3_canopy_maintain_frac_min(land_pts, nnpft, red_parms%frac_min,        &
+  red_parms%k_cai, red_parms%frac_excl, veg_state%frac_tile_excl,              &
+  red_state%crwn_area_mass(:,1), red_state%mass_mass(:,1),                     &
+  frac_above_mclass1, veg_state%frac(:,1:nnpft),                               &
+  red_state%plantNumDensity(:,:,1), dt, veg_state%mort_litC)
+
+! Pass 3: normalise mort_litC per unit PFT canopy area.
+DO n = 1,nnpft
+  DO l = 1,land_pts
     IF (veg_state%frac(l,n) > 0.0) THEN
       veg_state%mort_litC(l,n) = veg_state%mort_litC(l,n) /                    &
         veg_state%frac(l,n)
     ELSE
       veg_state%mort_litC(l,n) = 0.0
     END IF
-
   END DO
 END DO
 
@@ -261,11 +284,11 @@ SUBROUTINE update_pft_size_structure(                                          &
                 !IN Control vars
                 dt,                                                            &
                 !IN PFT parameters
-                mort_base,frac_min,                                            &
+                mort_base,                                                     &
                 !IN fields
                 mort_add,growth,P_s,g0,frac_shade,                             &
                 !IN mass-cohort properties
-                g_mass_scale,mass_mass,crwn_area_mass,                         &
+                g_mass_scale,mass_mass,                                        &
                 !INOUT state
                 plantNumDensity,mort,                                          &
                 !OUT diagnostics
@@ -288,8 +311,6 @@ dt,                                                                            &
               !  Dynamic vegetation time-step (s)
 mort_base,                                                                     &
               !  Background mortality rate for this PFT. (s-1)
-frac_min,                                                                      &
-              !  Minimum vegetation fraction for this PFT. (-)
 mort_add(mclass),                                                              &
               !  Additional plant mortality across plant mass (s-1)
 growth,                                                                        &
@@ -303,10 +324,8 @@ frac_shade,                                                                    &
               !  Competitive shading of seedlings in this PFT.
 g_mass_scale(mclass),                                                          &
               !  Allometric scaling of growth across the mass cohorts.
-mass_mass(mclass),                                                             &
+mass_mass(mclass)
               !  Mass of an individual member of each mass cohort. (kgC)
-crwn_area_mass(mclass)
-              !  Crown area of an individual member of each mass cohort. (m2)
 
 !-----------------------------------------------------------------------------
 ! Reals with INTENT INOUT
@@ -339,18 +358,14 @@ dplantNumDensity_dt(mclass),                                                   &
 flux_in(mclass),                                                               &
               ! Rate of change of population growing into a mass cohort.
               ! (m-2 s-1)
-flux_out(mclass),                                                              &
+flux_out(mclass)
               ! Rate of change of population growing out of a mass cohort.
               ! (m-2 s-1)
-frac_check
-              ! The difference between the minimum vegetation fraction and the
-              ! updated fraction. (-)
 
 !End of headers
 
 ! Initialise vars
 mort_litC               = 0.0
-frac_check              = 0.0
 g_mass(:)               = 0.0
 dplantNumDensity_dt(:)  = 0.0
 flux_in(:)              = 0.0
@@ -437,21 +452,8 @@ DO k = 1, mclass
 
   plantNumDensity(k) = plantNumDensity(k)                                      &
       + dplantNumDensity_dt(k) * dt
-  frac_check = frac_check + plantNumDensity(k)                                 &
-    * crwn_area_mass(k)
 
 END DO
-
-! If the resultant vegetation fraction is less than the minimum
-! fraction, add trees to the lowest mass class to make up the difference
-IF (frac_check < frac_min) THEN
-  ! Take this additional carbon from the litterfall flux
-  mort_litC = mort_litC - (frac_min - frac_check)/crwn_area_mass(1) *          &
-              mass_mass(1) / dt
-  plantNumDensity(1) = plantNumDensity(1)                                      &
-    +(frac_min - frac_check) / crwn_area_mass(1)
-
-END IF
 
 END SUBROUTINE update_pft_size_structure
 !-----------------------------------------------------------------------------
