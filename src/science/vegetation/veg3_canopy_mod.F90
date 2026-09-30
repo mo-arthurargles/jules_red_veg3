@@ -149,7 +149,7 @@ DO l = 1, land_pts
   DO i = 1, npft_totmclass
     n = order_pft_desc(i)
     k = order_mclass_desc(i)
-    IF (n == 0) EXIT
+    IF (n == 0) EXIT ! Zero indicates unused memory element in ordered arrays.
 
     IF (k == 1) frac_above_mclass1(l,n) = frac_above
 
