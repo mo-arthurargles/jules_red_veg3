@@ -31,8 +31,6 @@ SUBROUTINE veg3_red_dynamic(                                                   &
                 nnpft,nmasst,                                                  &
                 !IN red_parms
                 red_parms,                                                     &
-                !IN fields
-                growth,mort_add,                                               &
                 !IN state
                 veg_state,red_state                                            &
                 !OUT Diagnostics
@@ -62,10 +60,6 @@ INTEGER, INTENT(IN) :: land_pts,nnpft,veg_index(land_pts),veg_index_pts,nmasst
 ! Reals with INTENT IN
 !----------------------------------------------------------------------------
 REAL, INTENT(IN)   ::                                                          &
-growth(land_pts,nnpft),                                                        &
-              !  The total carbon assimilate across the PFT area. (kgC m-2 of PFT s-1)
-mort_add(land_pts,nnpft,nmasst),                                               &
-              !  Additional plant mortality across plant mass (s-1)
 dt_red
               !  Dynamic vegetation time-step (s)
 
@@ -75,12 +69,6 @@ dt_red
 INTEGER                ::l,n,k,j
 
 REAL                   ::                                                      &
-P_s(land_pts,nnpft),                                                           &
-              !  Total gridbox carbon assimilate devoted to recruitment.
-              ! (kgC m-2 s-1)
-g0(land_pts,nnpft),                                                            &
-              !  Boundary growth for an individual member of the smallest mass
-              !  cohort. (kgC s-1)
 frac_shade(land_pts,nnpft),                                                    &
               !  Competitive shading of seedlings in each PFT. (-)
 frac_above_mclass1(land_pts,nnpft)
@@ -92,52 +80,34 @@ frac_above_mclass1(land_pts,nnpft)
 
 ! Initialise vars
 veg_state%mort_litC(:,:)    = 0.0
-P_s(:,:)                    = 0.0
-g0(:,:)                     = 0.0
 frac_shade(:,:)             = 0.0
 
 ! Pass 1: update each PFT's size structure (growth/mortality) independently.
 ! mort_litC remains gridbox-normalised at this point.
 DO l = 1,land_pts
   DO n = 1,nnpft
-    ! Call to partition the PFT growth onto the mass class structure.
-    CALL growth_onto_mass_class(                                               &
-      !IN sizing
-      red_parms%mclass(n),                                                     &
-      !IN PFT parameters
-      red_parms%alpha_recrt(n),                                                &
-      !IN fields
-      veg_state%frac(l,n),growth(l,n),                                         &
-      !IN mass-cohort properties
-      red_state%plantNumDensity(l,n,1:red_parms%mclass(n)),                    &
-      red_state%g_mass_scale(n,1:red_parms%mclass(n)),                         &
-      !OUT fields
-      P_s(l,n),g0(l,n)                                                         &
-      )
-
     !Estimate the inter-PFT competition.
     DO j = 1, nnpft
       frac_shade(l,n) = MIN(1.0,frac_shade(l,n) + red_parms%comp_coef(n,j)     &
           * veg_state%frac(l,j))
     END DO
 
-    ! Call to update the PFT number density.
+    ! Call to update the PFT number density, using g_mass/P_s/mort precomputed
+    ! by red_veg3_assimilate_partition/veg3_mortality_partition ahead of
+    ! veg3_red_dynamic.
     CALL update_pft_size_structure(                                            &
       !IN sizing
       red_parms%mclass(n),                                                     &
       !IN Control vars
       dt_red,                                                                  &
-      !IN PFT parameters
-      red_parms%mort_base(n),                                                  &
       !IN fields
-      mort_add(l,n,1:red_parms%mclass(n)),growth(l,n),                         &
-      P_s(l,n),g0(l,n),frac_shade(l,n),                                        &
+      red_state%P_s(l,n),red_state%mort(l,n,1:red_parms%mclass(n)),            &
+      frac_shade(l,n),                                                         &
       !IN mass-cohort properties
-      red_state%g_mass_scale(n,1:red_parms%mclass(n)),                         &
+      red_state%g_mass(l,n,1:red_parms%mclass(n)),                             &
       red_state%mass_mass(n,1:red_parms%mclass(n)),                            &
       !INOUT state
       red_state%plantNumDensity(l,n,1:red_parms%mclass(n)),                    &
-      red_state%mort(l,n,1:red_parms%mclass(n)),                               &
       !OUT diagnostics
       veg_state%mort_litC(l,n)                                                 &
       )
@@ -152,8 +122,7 @@ CALL veg3_canopy_frac(land_pts, nnpft, nmasst, veg3_ctrl%npft_totmclass,       &
   red_state%order_pft_desc, red_state%order_mclass_desc, red_parms%k_cai,      &
   red_parms%frac_excl, veg_state%frac_tile_excl, red_state%crwn_area_mass,     &
   red_state%plantNumDensity, red_state%frac_mass, red_state%CAI_mass,          &
-  red_state%CAI_overlapped, veg_state%frac(:,1:nnpft), veg_state%CAI,          &
-  frac_above_mclass1)
+  veg_state%frac(:,1:nnpft), veg_state%CAI, frac_above_mclass1)
 
 CALL veg3_canopy_maintain_frac_min(land_pts, nnpft, red_parms%frac_min,        &
   red_parms%k_cai, red_parms%frac_excl, veg_state%frac_tile_excl,              &
@@ -177,120 +146,17 @@ END SUBROUTINE veg3_red_dynamic
 !-----------------------------------------------------------------------------
 
 !-----------------------------------------------------------------------------
-SUBROUTINE growth_onto_mass_class(                                             &
-                !IN sizing
-                mclass,                                                        &
-                !IN PFT parameters
-                alpha_recrt,                                                   &
-                !IN fields
-                frac,growth,                                                   &
-                !IN mass-cohort properties
-                plantNumDensity,g_mass_scale,                                  &
-                !OUT fields
-                P_s, g0                                                        &
-                )
-
-IMPLICIT NONE
-
-!-----------------------------------------------------------------------------
-! Integers with INTENT IN
-!-----------------------------------------------------------------------------
-INTEGER, INTENT(IN) :: mclass
-              !  Number of mass classes for this PFT.
-
-!-----------------------------------------------------------------------------
-! Reals with INTENT IN
-!-----------------------------------------------------------------------------
-REAL, INTENT(IN)     ::                                                        &
-alpha_recrt,                                                                   &
-              !  Fraction of PFT growth devoted to recruitment. (-)
-frac,                                                                          &
-              !  PFT fraction across the gridbox. (-)
-growth,                                                                        &
-              !  The total carbon assimilate across the PFT area. (kgC m-2 s-1)
-plantNumDensity(mclass),                                                       &
-              !  Population density within each mass cohort. (m-2)
-g_mass_scale(mclass)
-              !  Allometric scaling of growth across the mass cohorts.
-
-!-----------------------------------------------------------------------------
-! Reals with INTENT OUT
-!-----------------------------------------------------------------------------
-REAL, INTENT(OUT)    ::                                                        &
-P_s,                                                                           &
-              !  Gridbox carbon assimilate devoted to recruitment. (kgC m-2 s-1)
-g0
-              !  Boundary growth for an individual member of the smallest mass
-              !  cohort. (kgC s-1)
-
-!-----------------------------------------------------------------------------
-!Local Vars
-!-----------------------------------------------------------------------------
-INTEGER              :: k
-
-REAL                 ::                                                        &
-P_a,                                                                           &
-              !  The total PFT carbon assimilate across the gridbox.
-              !  (kgC m-2 s-1)
-G_struct,                                                                      &
-              ! Total gridbox carbon assimilate devoted to vegetation
-              ! structural growth. (kgC m-2 s-1)
-plantNumDensity_g_sum
-              !  Summation of the relative cohort contribution towards the
-              !  total PFT assimilate (m-2)
-
-!End of headers
-
-! Initialise vars
-P_s                     = 0.0
-g0                      = 0.0
-plantNumDensity_g_sum   = 0.0
-
-! Sum product of the number density and the allometric scaling
-DO k = 1, mclass
-  plantNumDensity_g_sum = plantNumDensity_g_sum                                &
-    + plantNumDensity(k) * g_mass_scale(k)
-END DO
-
-! Partition the growth into recruitment and structural growth
-P_a = frac * growth
-P_s = alpha_recrt * P_a
-G_struct = (1.0 - alpha_recrt) * P_a
-
-IF (plantNumDensity_g_sum > 0) THEN
-  g0 = G_struct / plantNumDensity_g_sum
-END IF
-
-IF (growth < 0.0) THEN
-  ! Recruitment does not apply when growth is negative. The associated
-  ! shrinkage is instead applied via g0/g_mass_scale metabolic (phi_g)
-  ! scaling in update_pft_size_structure.
-  P_s = 0.0
-
-  ! Adjust g0 to account for the loss of recruitment
-  IF (plantNumDensity_g_sum > 0) THEN
-    g0 = G_struct / plantNumDensity_g_sum
-  END IF
-
-END IF
-
-END SUBROUTINE growth_onto_mass_class
-!-----------------------------------------------------------------------------
-
-!-----------------------------------------------------------------------------
 SUBROUTINE update_pft_size_structure(                                          &
                 !IN sizing
                 mclass,                                                        &
                 !IN Control vars
                 dt_red,                                                        &
-                !IN PFT parameters
-                mort_base,                                                     &
                 !IN fields
-                mort_add,growth,P_s,g0,frac_shade,                             &
+                P_s,mort,frac_shade,                                           &
                 !IN mass-cohort properties
-                g_mass_scale,mass_mass,                                        &
+                g_mass,mass_mass,                                              &
                 !INOUT state
-                plantNumDensity,mort,                                          &
+                plantNumDensity,                                               &
                 !OUT diagnostics
                 mort_litC                                                      &
                 )
@@ -309,21 +175,16 @@ INTEGER, INTENT(IN) :: mclass
 REAL, INTENT(IN)     ::                                                        &
 dt_red,                                                                        &
               !  Dynamic vegetation time-step (s)
-mort_base,                                                                     &
-              !  Background mortality rate for this PFT. (s-1)
-mort_add(mclass),                                                              &
-              !  Additional plant mortality across plant mass (s-1)
-growth,                                                                        &
-              !  The total carbon assimilate across the PFT area. (kgC m-2 s-1)
 P_s,                                                                           &
               !  Gridbox carbon assimilate devoted to recruitment. (kgC m-2 s-1)
-g0,                                                                            &
-              !  Boundary growth for an individual member of the smallest mass
-              !  cohort. (kgC s-1)
+mort(mclass),                                                                  &
+              !  Total mortality rate across the mass cohorts, precomputed by
+              !  veg3_mortality_partition. (s-1)
 frac_shade,                                                                    &
               !  Competitive shading of seedlings in this PFT.
-g_mass_scale(mclass),                                                          &
-              !  Allometric scaling of growth across the mass cohorts.
+g_mass(mclass),                                                                &
+              !  Individual growth across the mass cohorts, precomputed by
+              !  red_veg3_assimilate_partition. (kgC s-1)
 mass_mass(mclass)
               !  Mass of an individual member of each mass cohort. (kgC)
 
@@ -331,10 +192,8 @@ mass_mass(mclass)
 ! Reals with INTENT INOUT
 !-----------------------------------------------------------------------------
 REAL, INTENT(IN OUT)  ::                                                       &
-plantNumDensity(mclass),                                                       &
+plantNumDensity(mclass)
               !  Population density within each mass cohort. (m-2)
-mort(mclass)
-              !  Mortality rate within each mass cohort. (s-1)
 
 !-----------------------------------------------------------------------------
 ! Reals with INTENT OUT
@@ -350,8 +209,6 @@ REAL, INTENT(OUT)    :: mort_litC
 INTEGER              :: k
 
 REAL                 ::                                                        &
-g_mass(mclass),                                                                &
-              !  Individual growth across the mass cohorts. (kgC s-1)
 dplantNumDensity_dt(mclass),                                                   &
               !  Net rate of change of population density within each mass
               ! cohort. (m-2 s-1)
@@ -366,24 +223,16 @@ flux_out(mclass)
 
 ! Initialise vars
 mort_litC               = 0.0
-g_mass(:)               = 0.0
 dplantNumDensity_dt(:)  = 0.0
 flux_in(:)              = 0.0
 flux_out(:)             = 0.0
 
 DO k = 1, mclass
 
-  ! Metabolic (phi_g) scaling of growth across the mass classes. When growth
-  ! is negative, this represents the equivalent scaling of litterfall losses:
-  ! litter is dominated by leaf and fine root turnover, which scale with
-  ! metabolic rate (mass**phi_g) rather than with mass itself.
-  g_mass(k) = g0 * g_mass_scale(k)
-
-  IF (growth < 0.0) THEN
+  ! g_mass shares growth's sign (g_mass_scale is always positive).
+  IF (g_mass(k) < 0.0) THEN
     ! Negative growth is represented as a downward shrinkage flux of
     ! individuals through the mass classes.
-    mort(k) = mort_base + mort_add(k)
-
     IF (k < mclass) THEN
       ! Flux shrinking down into this class from the class above
       flux_in(k) = - plantNumDensity(k+1) * g_mass(k+1)                        &
@@ -406,8 +255,6 @@ DO k = 1, mclass
     END IF
 
   ELSE
-    mort(k) = mort_base + mort_add(k)
-
     IF (k == 1) THEN
       ! Seedling flux
       flux_in(k) = P_s / mass_mass(k) * (1.0 - frac_shade)

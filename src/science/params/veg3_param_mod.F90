@@ -68,6 +68,8 @@ TYPE :: red_parm_type
     phi_l(:),                                                                  &
     comp_coef(:,:),                                                            &
     frac_min(:),                                                               &
+    frac_seed(:),                                                              &
+              ! Minimum vegetation fraction applied at initialisation. (-)
     mclass_geom_mult(:),                                                       &
     k_cai(:),                                                                  &
               ! PFT crown overlap coefficient used to determine the total
@@ -160,6 +162,7 @@ ALLOCATE(red_parms%phi_g              (nnpft))
 ALLOCATE(red_parms%phi_h              (nnpft))
 ALLOCATE(red_parms%phi_l              (nnpft))
 ALLOCATE(red_parms%frac_min           (nnpft))
+ALLOCATE(red_parms%frac_seed          (nnpft))
 ALLOCATE(red_parms%comp_coef          (nnpft,nnpft))
 ALLOCATE(red_parms%mclass_geom_mult   (nnpft))
 ALLOCATE(red_parms%k_cai              (nnpft))
@@ -186,6 +189,7 @@ red_parms%phi_g              = rmdi
 red_parms%phi_h              = rmdi
 red_parms%phi_l              = rmdi
 red_parms%frac_min           = rmdi
+red_parms%frac_seed          = rmdi
 red_parms%comp_coef          = rmdi
 red_parms%mclass_geom_mult   = rmdi
 red_parms%k_cai              = rmdi
@@ -205,7 +209,7 @@ USE pftparm,                  ONLY: g_leaf_0
 USE trif,                     ONLY: g_root, g_wood
 ! Above only allocated if triffid on - needs to be addressed
 USE jules_vegetation_mod,     ONLY: l_triffid, triffid_period,frac_min,        &
-                                    phenol_period
+                                    frac_seed, phenol_period
 
 USE red_io,                   ONLY: alpha_recrt, crwn_area0, dom_order,        &
                                     height0, lai_bal0, mass0, massi, mclass,   &
@@ -292,6 +296,7 @@ IF (l_red .AND. l_triffid) THEN
   red_parms%phi_l(:)            = phi_l(1:nnpft)
   red_parms%mclass_geom_mult(:) = 1.0 ! Default assumes 1 mass class
   red_parms%frac_min(:)         = frac_min
+  red_parms%frac_seed(:)        = frac_seed
   red_parms%k_cai(:)            = k_cai(1:nnpft)
 
   red_parms%comp_coef(:,:)      = 0.0

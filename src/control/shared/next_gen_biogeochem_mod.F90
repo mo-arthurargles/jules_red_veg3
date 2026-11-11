@@ -179,7 +179,9 @@ USE veg3_litter_mod, ONLY:  veg3_litter
 USE ancil_info,      ONLY: ainfo_type
 
 !Access subroutines
-USE veg3_red_dynamic_mod, ONLY:  veg3_red_dynamic
+USE veg3_red_dynamic_mod,              ONLY: veg3_red_dynamic
+USE veg3_red_assimilate_parition_mod,  ONLY: veg3_red_assimilate_partition
+USE veg3_mortality_partition_mod,      ONLY: veg3_mortality_partition
 
 !Access some parameters direct from module
 USE conversions_mod, ONLY: rsec_per_day
@@ -229,8 +231,6 @@ g_leaf_dr(land_pts,nnpft),                                                     &
     ! vegetation dynamics (s-1).
 local_litter(land_pts,nnpft),                                                  &
     ! Litter production (kg C/m2/s).
-growth(land_pts,nnpft),                                                        &
-    ! growth (kg C/m2/s).
 mort_add(land_pts,nnpft,nmasst)
     ! mortality above baseline (/m2)
 
@@ -288,7 +288,6 @@ IF (asteps_since_triffid == veg3_ctrl%nstep_trif) THEN
   ! Reset accumulation to zero - note this can be used to pass a negative flux
   ! back to JULES.
   veg_state%npp_acc(:,:)=0.0
-  growth = npp_dr - local_litter
 
   !Call Allocation/Nitrogen/NSC
 
@@ -303,14 +302,21 @@ IF (asteps_since_triffid == veg3_ctrl%nstep_trif) THEN
 
   !Call Veg Dynamics
   !Call Veg Dynamics - in this case RED
+
+  ! Estimate growth and g_mass/recruitment ahead of dynamics
+  CALL veg3_red_assimilate_partition(land_pts,nnpft,red_parms,npp_dr,          &
+    local_litter,veg_state%CAI,red_state)
+
+  ! Estimate total mortality (baseline + disturbance) ahead of dynamics
+  CALL veg3_mortality_partition(land_pts,nnpft,nmasst,red_parms,mort_add,      &
+    red_state)
+
   CALL veg3_red_dynamic(                                                       &
                   !IN control vars
                   veg3_ctrl%dt_red,veg_index_pts,veg_index,veg3_ctrl,land_pts, &
                   nnpft,nmasst,                                                &
                   !IN RED_parms
                   red_parms,                                                   &
-                  !IN fields
-                  growth,mort_add,                                             &
                   !IN state
                   veg_state,red_state                                          &
                   !OUT Diagnostics

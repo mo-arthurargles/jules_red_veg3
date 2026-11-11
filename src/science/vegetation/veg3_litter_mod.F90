@@ -105,10 +105,12 @@ DO n = 1, nnpft
   DO k = 1, veg_index_pts
     l = veg_index(k)
 
-    leaf_litter(l,n) = g_leaf_dr(l,n) * veg_state%leafC(l,n) *                 &
+    ! Litter uses the open-canopy (CAI-based) carbon densities, consistent
+    ! with the photosynthesis scheme (see sf_stom/cancap).
+    leaf_litter(l,n) = g_leaf_dr(l,n) * veg_state%leafC_CAI(l,n) *             &
                        veg_state%phen(l,n)
-    root_litter(l,n) = litter_parms%g_root(n) * veg_state%rootC(l,n)
-    wood_litter(l,n) = litter_parms%g_wood(n) * veg_state%woodC(l,n)
+    root_litter(l,n) = litter_parms%g_root(n) * veg_state%rootC_CAI(l,n)
+    wood_litter(l,n) = litter_parms%g_wood(n) * veg_state%woodC_CAI(l,n)
 
     ! Copy across to veg_state%leaf_litC, veg_state%root_litC, veg_state%wood_litC
     ! Convert to kg C m-2 (360d)-1

@@ -129,8 +129,11 @@ ELSE IF (can_model == 3 .OR. can_model == 4) THEN
       wood = stemc_from_prognostics(ft - nnpft, ht(l) )
 
     ELSE IF (l_red) THEN
-      leaf = veg_state%leafC(l,ft)
-      wood = veg_state%woodC(l,ft)
+      ! Heat capacity is a canopy (not ground-fraction) property, so use
+      ! the open-canopy (frac_mass-weighted, CAI-normalised) carbon
+      ! densities.
+      leaf = veg_state%leafC_CAI(l,ft)
+      wood = veg_state%woodC_CAI(l,ft)
 
     ELSE
       lai_bal(l) = ( a_ws(ft) * eta_sl(ft) * ht(l) /                           &

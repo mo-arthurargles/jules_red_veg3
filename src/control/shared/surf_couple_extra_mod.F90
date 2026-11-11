@@ -1127,7 +1127,7 @@ CASE ( jules )
 
         CALL sparm (land_pts,nsurft,surft_pts,ainfo%surft_index,               &
                     veg_state%frac,veg_state%canht,                            &
-                    veg_state%lai,psparms%z0m_soil_gb,                         &
+                    veg_state%lai,psparms%z0m_soil_gb,                        &
                     psparms%catch_snow_surft,psparms%catch_surft,              &
                     psparms%z0_surft,psparms%z0h_bare_surft,urban_param%ztm_gb)
 

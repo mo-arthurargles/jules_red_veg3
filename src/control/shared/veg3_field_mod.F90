@@ -47,7 +47,8 @@ TYPE :: veg_state_type
       woodC(:,:),                                                              &
               ! PFT woody carbon per PFT area fraction. (kg C m-2)
       lai_bal(:,:),                                                            &
-              ! Balanced LAI. (m2 m-2)
+              ! Balanced LAI, per unit open (overlap-corrected,
+              ! frac_mass-weighted) PFT ground fraction. (m2 m-2)
       vegCpft(:,:),                                                            &
               ! Total PFT carbon density per PFT area fraction. (kg C m-2)
       vegC(:),                                                                 &
@@ -68,7 +69,9 @@ TYPE :: veg_state_type
       phen(:,:),                                                               &
               ! PFT phenology state variable, diagnosed from lai and lai_bal.
       lai(:,:),                                                                &
-              ! Leaf area index. Associated with trif_vars%lai_pft (m2 m-2).
+              ! Leaf area index, per unit open (overlap-corrected,
+              ! frac_mass-weighted) PFT ground fraction. Associated with
+              ! trif_vars%lai_pft (m2 m-2).
       canht(:,:),                                                              &
               ! Canopy height. Associated with trif_vars%canht_pft. (m)
       g_leaf_phen(:,:),                                                        &
@@ -117,10 +120,20 @@ TYPE :: veg_state_type
       frac_tile_excl(:),                                                       &
               ! Fraction of the gridbox excluded from vegetation (non-soil,
               ! non-PFT tiles: urban/lake/ice). Static. (-)
-      CAI(:,:)
-              ! PFT crown area index (CAI), diagnosed from the RED model.
-              ! Not associated with any TRIFFID/trifctl field - local to
-              ! veg3/RED. (m2 m-2)
+      CAI(:,:),                                                                &
+              ! PFT crown area index (CAI) (m2 m-2)
+      vegCpft_CAI(:,:),                                                        &
+              ! Total PFT carbon density per unit crown area index (CAI).
+              ! (kg C m-2)
+      leafC_CAI(:,:),                                                         &
+              ! Open-canopy PFT leaf carbon per unit crown area index
+              ! (CAI). (kg C m-2)
+      rootC_CAI(:,:),                                                         &
+              ! Open-canopy PFT root carbon per unit crown area index
+              ! (CAI). (kg C m-2)
+      woodC_CAI(:,:)
+              ! Open-canopy PFT woody carbon per unit crown area index
+              ! (CAI). (kg C m-2)
 
 END TYPE veg_state_type
 
@@ -138,18 +151,37 @@ TYPE :: red_state_type
     g_mass_scale(:,:),                                                         &
               !  PFT plant growth scaling wrt metabolic scaling
               !  theory across mass. (kg C /kg C)
+    leaf_mass(:,:),                                                                 &
+              !  Individual leaf carbon mass, by mass class. (kg C)
+    froot_mass(:,:),                                                                &
+              !  Individual fine root carbon mass, by mass class. (kg C)
+    wood_mass(:,:),                                                                 &
+              !  Individual wood carbon mass, by mass class. (kg C)
     mclass_geom_mult(:),                                                       &
               !  PFT geometric scaling coefficent for binning mass classes (-)
     frac_mass(:,:,:),                                                          &
               !  PFT closed-canopy overlap-corrected area fraction, by mass
               !  class. (-)
     CAI_mass(:,:,:),                                                           &
-              !  PFT crown area index, by mass class (EQ1). (m2 m-2)
-    CAI_overlapped(:,:,:),                                                     &
-              !  Overlap-corrected crown area index, by mass class (EQ3).
-              !  (m2 m-2)
-    mort(:,:,:)
-              !  PFT mortality rate across plant mass. (/s)
+              !  PFT crown area index, by mass class. (m2 m-2)
+    mort(:,:,:),                                                               &
+              !  Total PFT mortality rate across plant mass (mort_base +
+              !  mort_dstrb), precomputed by veg3_mortality_partition_mod.
+              !  (/s)
+    mort_dstrb(:,:,:),                                                         &
+              !  Disturbance PFT mortality rate across plant mass. (/s)
+    g_mass(:,:,:),                                                             &
+              !  Individual growth across plant mass, precomputed by
+              !  veg3_red_assimilate_parition_mod. (kgC s-1)
+    P_s(:,:),                                                                  &
+              !  Gridbox carbon assimilate devoted to recruitment, precomputed
+              !  by veg3_red_assimilate_parition_mod. (kgC m-2 s-1)
+    P_a(:,:),                                                                  &
+              !  Total gridbox carbon assimilate (P_a = P_s + G_struct).
+              !  (kgC m-2 s-1)
+    G_struct(:,:)
+              !  Gridbox carbon assimilate devoted to structural growth
+              !  (P_a = P_s + G_struct). (kgC m-2 s-1)
   REAL, POINTER ::                                                             &
     plantNumDensity(:,:,:)
               !  PFT number density across plant mass. (/m2)
@@ -221,6 +253,10 @@ ALLOCATE(veg_state%litC         ( land_pts) )
 ALLOCATE(veg_state%mort_litC    ( land_pts, nnpft) )
 ALLOCATE(veg_state%nbp_gb       ( land_pts) )
 ALLOCATE(veg_state%CAI          ( land_pts, nnpft) )
+ALLOCATE(veg_state%vegCpft_CAI  ( land_pts, nnpft) )
+ALLOCATE(veg_state%leafC_CAI    ( land_pts, nnpft) )
+ALLOCATE(veg_state%rootC_CAI    ( land_pts, nnpft) )
+ALLOCATE(veg_state%woodC_CAI    ( land_pts, nnpft) )
 ALLOCATE(veg_state%frac_tile_excl( land_pts) )
 
 !Initialise
@@ -253,6 +289,10 @@ veg_state%litC(:)              = 0.0
 veg_state%mort_litC(:,:)       = 0.0
 veg_state%nbp_gb(:)            = 0.0
 veg_state%CAI(:,:)             = 0.0
+veg_state%vegCpft_CAI(:,:)     = 0.0
+veg_state%leafC_CAI(:,:)       = 0.0
+veg_state%rootC_CAI(:,:)       = 0.0
+veg_state%woodC_CAI(:,:)       = 0.0
 veg_state%frac_tile_excl(:)    = 0.0
 
 ! RED
@@ -263,11 +303,18 @@ ALLOCATE(red_state%ht_mass            (nnpft, nmasst ))
 ALLOCATE(red_state%lai_bal_mass       (nnpft, nmasst ))
 ALLOCATE(red_state%crwn_area_mass     (nnpft, nmasst ))
 ALLOCATE(red_state%g_mass_scale       (nnpft, nmasst ))
+ALLOCATE(red_state%leaf_mass           (nnpft, nmasst ))
+ALLOCATE(red_state%froot_mass          (nnpft, nmasst ))
+ALLOCATE(red_state%wood_mass           (nnpft, nmasst ))
 ALLOCATE(red_state%plantNumDensity    (land_pts, nnpft, nmasst ))
 ALLOCATE(red_state%mort               (land_pts, nnpft, nmasst ))
+ALLOCATE(red_state%mort_dstrb         (land_pts, nnpft, nmasst ))
 ALLOCATE(red_state%frac_mass          (land_pts, nnpft, nmasst ))
 ALLOCATE(red_state%CAI_mass           (land_pts, nnpft, nmasst ))
-ALLOCATE(red_state%CAI_overlapped     (land_pts, nnpft, nmasst ))
+ALLOCATE(red_state%g_mass             (land_pts, nnpft, nmasst ))
+ALLOCATE(red_state%P_s                (land_pts, nnpft ))
+ALLOCATE(red_state%P_a                 (land_pts, nnpft ))
+ALLOCATE(red_state%G_struct            (land_pts, nnpft ))
 ALLOCATE(red_state%order_pft_desc     (npft_totmclass))
 ALLOCATE(red_state%order_mclass_desc  (npft_totmclass))
 ALLOCATE(red_state%order_pft_asc      (npft_totmclass))
@@ -279,11 +326,18 @@ red_state%ht_mass(:,:)            = 0.0
 red_state%lai_bal_mass(:,:)       = 0.0
 red_state%crwn_area_mass(:,:)     = 0.0
 red_state%g_mass_scale(:,:)       = 0.0
+red_state%leaf_mass(:,:)           = 0.0
+red_state%froot_mass(:,:)          = 0.0
+red_state%wood_mass(:,:)           = 0.0
 red_state%plantNumDensity(:,:,:)  = 0.0
 red_state%mort(:,:,:)             = 0.0
+red_state%mort_dstrb(:,:,:)       = 0.0
 red_state%frac_mass(:,:,:)        = 0.0
 red_state%CAI_mass(:,:,:)         = 0.0
-red_state%CAI_overlapped(:,:,:)   = 0.0
+red_state%g_mass(:,:,:)           = 0.0
+red_state%P_s(:,:)                = 0.0
+red_state%P_a(:,:)                = 0.0
+red_state%G_struct(:,:)           = 0.0
 red_state%order_pft_desc(:)       = 0
 red_state%order_mclass_desc(:)    = 0
 red_state%order_pft_asc(:)        = 0
@@ -305,8 +359,8 @@ SUBROUTINE veg3_field_deallocate()
 !
 ! Note: veg_state%phen, veg_state%npp_acc, veg_state%mort_litC,
 ! veg_state%nbp_gb and the red_state ALLOCATABLE components (mass_mass,
-! ht_mass, lai_bal_mass, crwn_area_mass, g_mass_scale, mort) are
-! deliberately NOT included here. None of these are re-associated in
+! ht_mass, lai_bal_mass, crwn_area_mass, g_mass_scale, leaf_mass,
+! froot_mass, wood_mass, mort) are deliberately NOT included here. None of these are re-associated in
 ! veg3_field_assoc (the red_state ones are ALLOCATABLE rather than
 ! POINTER, so cannot be re-associated at all) and they remain the arrays
 ! allocated in veg3_field_allocate for the lifetime of the run. They are
@@ -441,6 +495,7 @@ USE jules_surface_types_mod,  ONLY: soil, urban, urban_canyon, urban_roof,    &
                                     lake, ice
 USE veg3_canopy_mod,          ONLY: veg3_canopy_frac, veg3_canopy_maintain_frac_min
 USE veg3_parm_mod,            ONLY: veg3_ctrl
+USE pftparm,                   ONLY: lma
 
 IMPLICIT NONE
 
@@ -454,6 +509,9 @@ INTEGER :: l,n
 REAL :: frac_above_mclass1(land_pts,nnpft)
         ! frac_above at the moment each PFT's lowest mass class was
         ! processed (see veg3_canopy_frac).
+REAL :: frac_min_init(nnpft)
+        ! Minimum fraction to apply at initialisation: frac_seed on a
+        ! genuine cold start (no plants), else frac_min on restart.
 
 !End of header
 !-----------------------------------------------------------------------------
@@ -476,16 +534,22 @@ IF (l_red .AND. l_triffid) THEN
 
   ! Preliminary overlap-corrected fraction from the dump-read
   ! plantNumDensity (may still be below frac_min at this point).
-  CALL veg3_canopy_frac(land_pts, nnpft, nmasst, veg3_ctrl%npft_totmclass,      &
+  CALL veg3_canopy_frac(land_pts, nnpft, nmasst, veg3_ctrl%npft_totmclass,     &
     red_state%order_pft_desc, red_state%order_mclass_desc, red_parms%k_cai,    &
     red_parms%frac_excl, veg_state%frac_tile_excl, red_state%crwn_area_mass,   &
     red_state%plantNumDensity, red_state%frac_mass, red_state%CAI_mass,        &
-    red_state%CAI_overlapped, veg_state%frac(:,1:nnpft), veg_state%CAI,        &
-    frac_above_mclass1)
+    veg_state%frac(:,1:nnpft), veg_state%CAI, frac_above_mclass1)
 
   ! Top up any PFT below its minimum fraction (no litter adjustment at
-  ! initialisation - see item 9).
-  CALL veg3_canopy_maintain_frac_min(land_pts, nnpft, red_parms%frac_min,       &
+  ! initialisation - see item 9). Use frac_seed on a genuine cold start
+  ! (no plants present); otherwise maintain the restarted frac_min.
+  IF (SUM(progs%plantNumDensity) <= 0.0) THEN
+    frac_min_init(:) = red_parms%frac_seed(:)
+  ELSE
+    frac_min_init(:) = red_parms%frac_min(:)
+  END IF
+
+  CALL veg3_canopy_maintain_frac_min(land_pts, nnpft, frac_min_init,           &
     red_parms%k_cai, red_parms%frac_excl, veg_state%frac_tile_excl,            &
     red_state%crwn_area_mass(:,1), red_state%mass_mass(:,1),                   &
     frac_above_mclass1, veg_state%frac(:,1:nnpft),                             &
@@ -507,18 +571,30 @@ IF (l_red .AND. l_triffid) THEN
         red_state%mass_mass(n,1:red_parms%mclass(n)),                          &
         red_state%lai_bal_mass(n,1:red_parms%mclass(n)),                       &
         red_state%ht_mass(n,1:red_parms%mclass(n)),                            &
+        red_state%leaf_mass(n,1:red_parms%mclass(n)),                          &
+        red_state%froot_mass(n,1:red_parms%mclass(n)),                        &
+        red_state%wood_mass(n,1:red_parms%mclass(n)),                         &
         red_state%crwn_area_mass(n,1:red_parms%mclass(n)),                     &
-        !IN overlap-corrected fraction and crown area index
-        veg_state%frac(l,n),veg_state%CAI(l,n),                                &
-        !OUT fields
-        veg_state%vegCpft(l,n),veg_state%lai_bal(l,n),                        &
-        veg_state%canht(l,n)                                                   &
+        !IN PFT trait parameter used to invert leafC for lai_bal
+        lma(n),                                                                &
+        !IN overlap-corrected PFT ground area fraction, by mass class
+        red_state%frac_mass(l,n,1:red_parms%mclass(n)),                        &
+        !IN total PFT fraction and crown area index
+        veg_state%frac(l,n),veg_state%CAI(l,n),                               &
+        !OUT fields (all recomputed properly below by the red_veg3_couple
+        ! call, not needed here)
+        veg_state%vegCpft(l,n),                                               &
+        veg_state%leafC(l,n),veg_state%rootC(l,n),veg_state%woodC(l,n),       &
+        veg_state%vegCpft_CAI(l,n),veg_state%leafC_CAI(l,n),                   &
+        veg_state%rootC_CAI(l,n),veg_state%woodC_CAI(l,n),                     &
+        veg_state%canht(l,n),veg_state%lai_bal(l,n)                            &
         )
 
-      ! Here we estimate the phenology diagnosed from the lai and lai_bal from
-      ! the dump/intialisation.
-      IF (veg_state%lai_bal(l,n) > 0.0 .AND.  veg_state%lai_bal(l,n) >=        &
-          veg_state%lai(l,n)) THEN
+
+      ! Here we estimate the phenology diagnosed from the lai and lai_bal
+      ! from the dump/intialisation.
+      IF (veg_state%lai_bal(l,n) > 0.0 .AND.                                   &
+          veg_state%lai_bal(l,n) >= veg_state%lai(l,n)) THEN
         veg_state%phen(l,n) = veg_state%lai(l,n) / veg_state%lai_bal(l,n)
 
       ELSE
@@ -548,12 +624,18 @@ SUBROUTINE veg3_red_set_fields(nnpft,nmasst)
 
 USE veg3_canopy_mod, ONLY: veg3_canopy_height_order
 USE veg3_parm_mod, ONLY: veg3_ctrl
+USE jules_surface_mod, ONLY: cmass
+USE pftparm, ONLY: lma
+USE ereport_mod, ONLY: ereport
 
 IMPLICIT NONE
 
 INTEGER, INTENT(IN) :: nnpft, nmasst
 
 INTEGER :: n,k
+INTEGER :: errorstatus
+CHARACTER(LEN=100) :: message_text
+CHARACTER(LEN=*), PARAMETER :: RoutineName='VEG3_RED_SET_FIELDS'
 
 !End of header
 
@@ -577,6 +659,25 @@ DO k = 1,nmasst
         / red_parms%mass0(n))** red_parms%phi_g(n)
       red_state%lai_bal_mass(n,k) = red_parms%lai_bal0(n)                      &
         * (red_state%mass_mass(n,k) / red_parms%mass0(n))** red_parms%phi_l(n)
+    END IF
+
+    IF (k <= red_parms%mclass(n)) THEN
+      ! Individual leaf/fine-root/wood carbon mass within this mass class,
+      ! partitioned out of the individual's total mass (mass_mass). Fine
+      ! root mass is assumed equal to leaf mass (as for the PFT-area-mean
+      ! leafC/rootC previously calculated directly from lai_bal).
+      red_state%leaf_mass(n,k) = cmass * lma(n) * red_state%lai_bal_mass(n,k)  &
+        * red_state%crwn_area_mass(n,k)
+      red_state%froot_mass(n,k) = red_state%leaf_mass(n,k)
+      red_state%wood_mass(n,k) = red_state%mass_mass(n,k)                      &
+        - red_state%leaf_mass(n,k) - red_state%froot_mass(n,k)
+
+      IF (red_state%wood_mass(n,k) < 0.0) THEN
+        errorstatus = 101
+        WRITE(message_text, '(A,I0,A,I0)') 'Negative wood_mass diagnosed ' // &
+          'for pft=', n, ', mass class=', k
+        CALL ereport(RoutineName, errorstatus, message_text)
+      END IF
     END IF
   END DO
 END DO
@@ -623,13 +724,12 @@ SUBROUTINE red_veg3_couple(ainfo)
 
 USE ancil_info,                   ONLY: land_pts, nmasst, ainfo_type
 USE jules_surface_types_mod,      ONLY: nnpft, soil
-USE jules_surface_mod,            ONLY: cmass
-USE pftparm,                      ONLY: lma
 USE gridbox_mean_mod,             ONLY: pfttiles_to_gbm,                       &
                                         masstiles_to_pfttiles
 USE conversions_mod, ONLY: rsec_per_day
 USE veg3_parm_mod, ONLY: veg3_ctrl
 USE veg3_canopy_mod, ONLY: veg3_canopy_frac
+USE pftparm, ONLY: lma
 
 IMPLICIT NONE
 
@@ -653,6 +753,10 @@ REAL :: frac_flux(land_pts,nnpft)
 REAL :: frac_above_mclass1(land_pts,nnpft)
         ! frac_above at the moment each PFT's lowest mass class was
         ! processed (see veg3_canopy_frac). Unused here.
+REAL :: cai_frac_scale(land_pts,nnpft)
+        ! Ratio of CAI to frac, used to convert the per-CAI NPP/litter
+        ! fluxes output by photosynthesis/litter calculations to a per-PFT
+        ! ground area (frac) basis for output.
 
 !-----------------------------------------------------------------------------
 !end of header
@@ -665,20 +769,24 @@ veg_state%lai_bal(:,:)  = 0.0
 veg_state%canht(:,:)    = 0.0
 veg_state%lai_bal(:,:) = 0.0
 veg_state%canht(:,:)   = 0.0
+veg_state%vegC(:) = 0.0
+veg_state%litC(:) = 0.0
+veg_state%npp_n_gb(:) = 0.0
+veg_state%npp_gb(:) = 0.0
 
 ! Estimate the vegetation fraction and CAI.
 CALL veg3_canopy_frac(land_pts, nnpft, nmasst, veg3_ctrl%npft_totmclass,       &
   red_state%order_pft_desc, red_state%order_mclass_desc, red_parms%k_cai,      &
   red_parms%frac_excl, veg_state%frac_tile_excl, red_state%crwn_area_mass,     &
   red_state%plantNumDensity, red_state%frac_mass, red_state%CAI_mass,          &
-  red_state%CAI_overlapped, veg_state%frac(:,1:nnpft), veg_state%CAI,          &
-  frac_above_mclass1)
+  veg_state%frac(:,1:nnpft), veg_state%CAI, frac_above_mclass1)
 
 DO n = 1,nnpft
   DO l = 1,land_pts
 
-    ! Estimate the PFT mean physical properties by aggregating across the
-    ! mass class structure.
+    ! Estimate the PFT mean physical properties (per-frac and per-CAI, see
+    ! pft_mean_from_mass_class) by aggregating across the mass class
+    ! structure.
     CALL pft_mean_from_mass_class(                                             &
       !IN sizing
       red_parms%mclass(n),                                                     &
@@ -687,24 +795,25 @@ DO n = 1,nnpft
       red_state%mass_mass(n,1:red_parms%mclass(n)),                            &
       red_state%lai_bal_mass(n,1:red_parms%mclass(n)),                         &
       red_state%ht_mass(n,1:red_parms%mclass(n)),                              &
+      red_state%leaf_mass(n,1:red_parms%mclass(n)),                            &
+      red_state%froot_mass(n,1:red_parms%mclass(n)),                          &
+      red_state%wood_mass(n,1:red_parms%mclass(n)),                           &
       red_state%crwn_area_mass(n,1:red_parms%mclass(n)),                       &
-      !IN overlap-corrected fraction and crown area index
+      !IN PFT trait parameter used to invert leafC for lai_bal
+      lma(n),                                                                  &
+      !IN overlap-corrected PFT ground area fraction, by mass class
+      red_state%frac_mass(l,n,1:red_parms%mclass(n)),                          &
+      !IN total PFT fraction and crown area index
       veg_state%frac(l,n),veg_state%CAI(l,n),                                  &
       !OUT fields
-      veg_state%vegCpft(l,n),veg_state%lai_bal(l,n),                          &
-      veg_state%canht(l,n)                                                     &
+      veg_state%vegCpft(l,n),                                                  &
+      veg_state%leafC(l,n),veg_state%rootC(l,n),veg_state%woodC(l,n),         &
+      veg_state%vegCpft_CAI(l,n),veg_state%leafC_CAI(l,n),                      &
+      veg_state%rootC_CAI(l,n),veg_state%woodC_CAI(l,n),                       &
+      veg_state%canht(l,n),veg_state%lai_bal(l,n)                              &
       )
 
-    ! Update the phenology
     veg_state%lai(l,n)   = veg_state%phen(l,n) * veg_state%lai_bal(l,n)
-
-    ! Update the leaf the root pools
-    veg_state%leafC(l,n) = cmass * lma(n) * veg_state%lai_bal(l,n)
-    veg_state%rootC(l,n) = cmass * lma(n) * veg_state%lai_bal(l,n)
-    ! Wood carbon balance of total minus leaf and root
-    veg_state%woodC(l,n) = veg_state%vegCpft(l,n) - veg_state%leafC(l,n)       &
-                            - veg_state%rootC(l,n)
-
 
     ! NPP and its derived litter fluxes are normalised per unit PFT canopy
     ! area. frac_flux is the representative PFT fraction used to convert
@@ -712,14 +821,6 @@ DO n = 1,nnpft
     ! step, taken as the midpoint of the old and new PFT fraction (mirroring
     ! TRIFFID's own frac_flux normalisation of lit_c).
     frac_flux(l,n) = 0.5 * (frac_old(l,n) + veg_state%frac(l,n))
-
-    ! Derive litCpft implicitly from carbon conservation (NPP minus the
-    ! change in standing PFT carbon), which guarantees the litter flux is
-    ! consistent with the actual change in vegetation carbon.
-    CALL litCpft_implicit(veg_state%npp_dr_out(l,n), frac_old(l,n),            &
-                           veg_state%frac(l,n), frac_flux(l,n),                &
-                           vegCpft_old(l,n), veg_state%vegCpft(l,n),           &
-                           veg3_ctrl%dt_red, veg_state%litCpft(l,n))
 
     ! Rescale NPP and litterfall fluxes by frac_old/frac_flux so the total
     ! gridbox flux is retained under the new PFT area. Left unchanged if
@@ -737,8 +838,45 @@ DO n = 1,nnpft
                                    / frac_flux(l,n)
     END IF
 
-    ! Update bare soil
-    veg_state%frac(l,soil) = MAX(0.0, 1.0 - SUM(veg_state%frac(l,1:nnpft)))
+    ! npp_dr_out and the litter fluxes above are on a per-CAI basis (see
+    ! sf_stom/cancap and veg3_litter_mod); convert to per-frac for output
+    ! and for the litCpft_implicit call below.
+    IF (veg_state%frac(l,n) > 0.0) THEN
+      cai_frac_scale(l,n) = veg_state%CAI(l,n) / veg_state%frac(l,n)
+    ELSE
+      cai_frac_scale(l,n) = 0.0
+    END IF
+
+    ! Cap npp_dr_out at CAI=1 (as for growth - see next_gen_biogeochem_mod)
+    ! before converting from per-CAI to per-PFT ground area (frac) density.
+    veg_state%npp_dr_out(l,n) =  veg_state%CAI(l,n) *                 &
+                                 veg_state%npp_dr_out(l,n)
+    veg_state%npp_dr_out(l,n) = veg_state%npp_dr_out(l,n) * cai_frac_scale(l,n)
+    veg_state%leaf_litC(l,n)  = veg_state%leaf_litC(l,n)  * cai_frac_scale(l,n)
+    veg_state%root_litC(l,n)  = veg_state%root_litC(l,n)  * cai_frac_scale(l,n)
+    veg_state%wood_litC(l,n)  = veg_state%wood_litC(l,n)  * cai_frac_scale(l,n)
+
+    ! Derive litCpft implicitly from carbon conservation (NPP minus the
+    ! change in standing PFT carbon), which guarantees the litter flux is
+    ! consistent with the actual change in vegetation carbon.
+    CALL litCpft_implicit(veg_state%npp_dr_out(l,n), frac_old(l,n),            &
+                           veg_state%frac(l,n), frac_flux(l,n),                &
+                           vegCpft_old(l,n), veg_state%vegCpft(l,n),           &
+                           veg3_ctrl%dt_red, veg_state%litCpft(l,n))
+
+    ! Update bare soil, also subtracts from urban, lake and snow fractions
+    veg_state%frac(l,soil) = MAX(0.0, 1.0 - SUM(veg_state%frac(l,1:nnpft)) -   &
+                             veg_state%frac_tile_excl(l))
+
+    ! Aggregate the per-PFT contributions to update the gridbox-level fields
+    veg_state%vegC(l) = veg_state%vegC(l) + veg_state%vegCpft(l,n) *           &
+                        veg_state%frac(l,n)
+    veg_state%npp_n_gb(l) = veg_state%npp_n_gb(l) + veg_state%npp_dr_out(l,n) *&
+                            frac_flux(l,n)
+    veg_state%npp_gb(l) = veg_state%npp_gb(l) + veg_state%npp_dr_out(l,n) *    &
+                          frac_flux(l,n) / (rsec_per_day * 360.0)
+    veg_state%litC(l) = veg_state%litC(l) + veg_state%litCpft(l,n) *           &
+                        frac_flux(l,n)
 
   END DO
 
@@ -754,22 +892,6 @@ DO l = 1,land_pts
   END IF
 END DO
 
-!Final aggregation to gridbox for vegetation carbon for diagnostic purposes
-veg_state%vegC = pfttiles_to_gbm(veg_state%vegCpft,ainfo,                      &
-                              frac_surft_in = veg_state%frac)
-
-! Aggregate the per-PFT litter contributions for the gridbox total
-veg_state%litC(:) = pfttiles_to_gbm(veg_state%litCpft,ainfo,                   &
-                  frac_surft_in = veg_state%frac)
-
-! Aggregate the per-PFT NPP driving RED to gridbox mean diagnostics.
-! npp_dr_out is in kg C m-2 (360d)-1, matching npp_n_gb's units directly.
-! npp_gb instead uses kg C m-2 s-1, so is converted back from (360d)-1.
-! Nitrogen is not yet coupled to veg3/RED, so npp_n_gb is currently just
-! the (360d)-1 equivalent of npp_gb.
-veg_state%npp_n_gb(:) = pfttiles_to_gbm(veg_state%npp_dr_out,ainfo,            &
-                       frac_surft_in = veg_state%frac)
-veg_state%npp_gb(:) = veg_state%npp_n_gb(:) / (rsec_per_day * 360.0)
 
 RETURN
 END SUBROUTINE red_veg3_couple
@@ -779,22 +901,31 @@ SUBROUTINE pft_mean_from_mass_class(                                           &
                 !IN sizing
                 mclass,                                                        &
                 !IN mass-cohort properties
-                plantNumDensity,mass_mass,lai_bal_mass,ht_mass,crwn_area_mass, &
-                !IN overlap-corrected fraction and crown area index
-                frac,CAI,                                                      &
-                !OUT fields
-                vegCpft,lai_bal,canht                                          &
+                plantNumDensity,mass_mass,lai_bal_mass,ht_mass,                &
+                leaf_mass,froot_mass,wood_mass,crwn_area_mass,                 &
+                !IN PFT trait parameter used to invert leafC for lai_bal
+                lma_pft,                                                       &
+                !IN overlap-corrected PFT ground area fraction, by mass class
+                frac_mass,                                                     &
+                !IN total PFT fraction and crown area index (CAI)
+                frac,CAI_pft,                                                  &
+                !OUT fields, per unit frac (whole-population)
+                vegCpft,leafC,rootC,woodC,                                     &
+                !OUT fields, per unit CAI (open-canopy)
+                vegCpft_CAI,leafC_CAI,rootC_CAI,woodC_CAI,canht,lai_bal        &
                 )
 !-----------------------------------------------------------------------------
 ! Aggregates the plant number density across the mass class structure of a
-! single PFT at a single point into the PFT mean physical properties
-! (carbon density, balanced LAI and canopy height). vegCpft is normalised
-! by the overlap-corrected PFT area fraction (frac), matching the ground
-! area it is later upscaled over. lai_bal and canht are per-plant physical
-! properties defined per unit crown area, so are normalised by the
-! (non-overlap-corrected) crown area index (CAI) instead - frac
-! underestimates the true crown-bearing area once crowns overlap.
+! single PFT at a single point into the PFT mean physical properties.
+!
+! vegCpft/leafC/rootC/woodC weight by the whole population
+! (plantNumDensity), normalised per unit frac. canht, lai_bal and the
+! _CAI fields weight by frac_mass (open-canopy, overlap-corrected) and
+! normalise per unit CAI_pft instead, for use by the land-surface/
+! photosynthesis scheme.
 !-----------------------------------------------------------------------------
+
+USE jules_surface_mod, ONLY: cmass
 
 IMPLICIT NONE
 
@@ -817,64 +948,130 @@ lai_bal_mass(mclass),                                                          &
               !  cohort. (m2 m-2)
 ht_mass(mclass),                                                               &
               !  Height of an individual member of each mass cohort. (m)
+leaf_mass(mclass),                                                             &
+              !  Individual leaf carbon mass of each mass cohort. (kg C)
+froot_mass(mclass),                                                            &
+              !  Individual fine root carbon mass of each mass cohort. (kg C)
+wood_mass(mclass),                                                             &
+              !  Individual wood carbon mass of each mass cohort. (kg C)
 crwn_area_mass(mclass),                                                        &
-              !  Crown area of an individual member of each mass cohort. (m2)
+              !  Crown area of an individual member of each mass cohort.
+              !  (m2)
+frac_mass(mclass),                                                             &
+              !  PFT closed-canopy overlap-corrected ground area fraction
+              !  contributed by each mass cohort. (-)
 frac,                                                                          &
-              !  PFT fraction across the gridbox, already overlap-corrected
-              !  by veg3_canopy_frac. (-)
-CAI
-              !  PFT crown area index, SUM(plantNumDensity*crwn_area_mass)
-              !  (not overlap-corrected). (m2 m-2)
+              !  Total PFT ground area fraction, SUM(frac_mass). (-)
+CAI_pft,                                                                       &
+              !  Total PFT crown area index, SUM(CAI_mass). (m2 m-2)
+lma_pft
+              !  PFT leaf mass per unit area (1/SLA), used to invert leafC for
+              !  the effective balanced LAI. (kg leaf m-2)
 
 !-----------------------------------------------------------------------------
 ! Reals with INTENT OUT
 !-----------------------------------------------------------------------------
 REAL, INTENT(OUT)    ::                                                        &
 vegCpft,                                                                       &
-              !  Total PFT carbon density per PFT area fraction. (kg C m-2)
-lai_bal,                                                                       &
-              !  Balanced LAI per unit crown area. (m2 m-2)
-canht
-              !  Canopy height per unit crown area. (m)
+              !  Total PFT carbon density per unit PFT ground area. (kg C m-2)
+leafC,                                                                         &
+              !  PFT leaf carbon density per unit PFT ground area. (kg C m-2)
+rootC,                                                                         &
+              !  PFT fine root carbon density per unit PFT ground area.
+              !  (kg C m-2)
+woodC,                                                                         &
+              !  PFT wood carbon density per unit PFT ground area. (kg C m-2)
+vegCpft_CAI,                                                                   &
+              !  Total PFT carbon density per unit crown area index (CAI).
+              !  (kg C m-2)
+leafC_CAI,                                                                     &
+              !  Open-canopy PFT leaf carbon density per unit crown area
+              !  index (CAI). (kg C m-2)
+rootC_CAI,                                                                     &
+              !  Open-canopy PFT fine root carbon density per unit crown
+              !  area index (CAI). (kg C m-2)
+woodC_CAI,                                                                     &
+              !  Open-canopy PFT wood carbon density per unit crown area
+              !  index (CAI). (kg C m-2)
+canht,                                                                         &
+              !  Canopy height per unit crown area index (CAI). (m)
+lai_bal
+              !  Open-canopy (bounded) balanced LAI per unit crown area
+              !  index (CAI). (m2 m-2)
 
 !-----------------------------------------------------------------------------
 !Local Vars
 !-----------------------------------------------------------------------------
 INTEGER              :: k
+REAL                 :: vegCpft_raw, canht_raw, leafC_raw, rootC_raw,          &
+                        woodC_raw,                                             &
+                        leafC_CAI_raw, rootC_CAI_raw, woodC_CAI_raw
+              !  Unnormalised sums.
 
 !End of headers
 
 ! Initialise vars
-vegCpft = 0.0
-lai_bal = 0.0
-canht   = 0.0
+vegCpft_raw    = 0.0
+canht_raw      = 0.0
+leafC_raw      = 0.0
+rootC_raw      = 0.0
+woodC_raw      = 0.0
+leafC_CAI_raw  = 0.0
+rootC_CAI_raw  = 0.0
+woodC_CAI_raw  = 0.0
 
-! Convert from plant number on mass classes to biomass on PFTs, and
-! biomass to carbon.
+! leafC/rootC/woodC aggregate the same way as vegCpft (whole-population,
+! per unit frac). canht and the open-canopy carbon densities weight by
+! frac_mass instead, converting leaf/root/wood mass to a density via
+! crown area.
 DO k = 1, mclass
-  vegCpft = vegCpft + plantNumDensity(k) * mass_mass(k)
-  lai_bal = lai_bal + plantNumDensity(k) * lai_bal_mass(k) * crwn_area_mass(k)
-  canht   = canht   + plantNumDensity(k) * ht_mass(k) * crwn_area_mass(k)
+  vegCpft_raw   = vegCpft_raw   + plantNumDensity(k) * mass_mass(k)
+  canht_raw     = canht_raw     + frac_mass(k) * ht_mass(k)
+  leafC_raw     = leafC_raw     + plantNumDensity(k) * leaf_mass(k)
+  rootC_raw     = rootC_raw     + plantNumDensity(k) * froot_mass(k)
+  woodC_raw     = woodC_raw     + plantNumDensity(k) * wood_mass(k)
+  leafC_CAI_raw = leafC_CAI_raw + frac_mass(k) * leaf_mass(k)                  &
+                                   / crwn_area_mass(k)
+  rootC_CAI_raw = rootC_CAI_raw + frac_mass(k) * froot_mass(k)                 &
+                                   / crwn_area_mass(k)
+  woodC_CAI_raw = woodC_CAI_raw + frac_mass(k) * wood_mass(k)                  &
+                                   / crwn_area_mass(k)
 END DO
 
-! Convert carbon density to per m2 PFT (overlap-corrected) area.
+! Normalise the whole-population fields per unit frac.
 IF (frac > 0.0) THEN
-  vegCpft = vegCpft / frac
+  vegCpft = vegCpft_raw / frac
+  leafC   = leafC_raw   / frac
+  rootC   = rootC_raw   / frac
+  woodC   = woodC_raw   / frac
 ELSE
 
   ! If frac is zero, set mean to lowest mass class value
   vegCpft = mass_mass(1)
+  leafC   = leaf_mass(1)
+  rootC   = froot_mass(1)
+  woodC   = wood_mass(1)
 END IF
 
-! Convert lai_bal/canht to per m2 crown area (not overlap-corrected).
-IF (CAI > 0.0) THEN
-  lai_bal = lai_bal / CAI
-  canht   = canht   / CAI
+! Normalise the open-canopy fields per unit CAI_pft, inverting
+! leafC_CAI = cmass * lma * lai_bal to get the effective balanced LAI.
+IF (CAI_pft > 0.0) THEN
+  vegCpft_CAI = vegCpft_raw / CAI_pft
+  canht       = canht_raw   / CAI_pft
+  leafC_CAI   = leafC_CAI_raw / CAI_pft
+  rootC_CAI   = rootC_CAI_raw / CAI_pft
+  woodC_CAI   = woodC_CAI_raw / CAI_pft
+  ! Think about lai_bal here.
+  lai_bal     = leafC_CAI / (cmass * lma_pft)
 ELSE
 
-  ! If CAI is zero, set mean to lowest mass class value
-  lai_bal = lai_bal_mass(1)
-  canht   = ht_mass(1)
+  ! If CAI_pft is zero, set mean to lowest mass class value
+  vegCpft_CAI = mass_mass(1)
+  canht       = ht_mass(1)
+  leafC_CAI   = leaf_mass(1)  / crwn_area_mass(1)
+  rootC_CAI   = froot_mass(1) / crwn_area_mass(1)
+  woodC_CAI   = wood_mass(1)  / crwn_area_mass(1)
+  lai_bal     = lai_bal_mass(1)
 END IF
 
 END SUBROUTINE pft_mean_from_mass_class

@@ -1526,7 +1526,7 @@ DO m = 1,veg_pts
 
       !Initial calculation of N content in respiring stem wood
       IF (l_red) THEN
-        n_stem(l) = veg_state%woodC(l,ft) / a_ws(ft) * nsw(ft)
+        n_stem(l) = veg_state%woodC_CAI(l,ft) / a_ws(ft) * nsw(ft)
       ELSE
         n_stem(l) = eta_sl(ft) * ht(l) * lai_bal(l) * nsw(ft)
       END IF
@@ -1572,13 +1572,26 @@ DO m = 1,veg_pts
     !-------------------------------------------------------------------------
     IF ( l_trait_phys ) THEN
 
-      leafc(l)     = lma(ft) * lai(l) * cmass
-      leafc_bal(l) = lma(ft) * lai_bal(l) * cmass
+
 
       IF ( l_red ) THEN
-        rootc(l) = veg_state%rootC(l,ft)
-        woodc(l) = veg_state%woodC(l,ft)
+
+        IF ( veg_state%lai_bal(l,ft) > 0.0) THEN
+
+          leafc(l) = veg_state%leafC_CAI(l,ft) * (veg_state%lai(l,ft) /       &
+                     veg_state%lai_bal(l,ft))
+
+        ELSE
+          leafc(l) = 0.0
+
+        END IF
+
+        leafc_bal(l) = veg_state%leafC_CAI(l,ft)
+        rootc(l) = veg_state%rootC_CAI(l,ft)
+        woodc(l) = veg_state%woodC_CAI(l,ft)
       ELSE
+        leafc(l)     = lma(ft) * lai(l) * cmass
+        leafc_bal(l) = lma(ft) * lai_bal(l) * cmass
         rootc(l) = lma(ft) * lai_bal(l) * cmass
         woodc(l) = a_ws(ft) * eta_sl(ft) * ht(l) * lai_bal(l)
       END IF ! ( l_red )

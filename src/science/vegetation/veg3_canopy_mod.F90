@@ -101,7 +101,7 @@ SUBROUTINE veg3_canopy_frac(land_pts, nnpft, nmasst, npft_totmclass,           &
                              order_pft_desc, order_mclass_desc, k_cai,         &
                              frac_excl, frac_tile_excl, crwn_area_mass,        &
                              plantNumDensity, frac_mass, CAI_mass,             &
-                             CAI_overlapped, frac, CAI, frac_above_mclass1)
+                             frac, CAI, frac_above_mclass1)
 ! Height-ordered gap-fraction overlap calculation.
 ! Processes all (PFT, mass-class) cohorts tallest-to-shortest at each land
 ! point, so each cohort's fraction is only allowed to claim ground not
@@ -124,7 +124,6 @@ REAL, INTENT(IN)    :: plantNumDensity(land_pts,nnpft,nmasst)
 
 REAL, INTENT(OUT) :: frac_mass(land_pts,nnpft,nmasst)
 REAL, INTENT(OUT) :: CAI_mass(land_pts,nnpft,nmasst)
-REAL, INTENT(OUT) :: CAI_overlapped(land_pts,nnpft,nmasst)
 REAL, INTENT(OUT) :: frac(land_pts,nnpft)
 REAL, INTENT(OUT) :: CAI(land_pts,nnpft)
 REAL, INTENT(OUT) :: frac_above_mclass1(land_pts,nnpft)
@@ -140,7 +139,6 @@ frac(:,:)               = 0.0
 CAI(:,:)                = 0.0
 frac_mass(:,:,:)        = 0.0
 CAI_mass(:,:,:)         = 0.0
-CAI_overlapped(:,:,:)   = 0.0
 frac_above_mclass1(:,:) = 0.0
 
 DO l = 1, land_pts
@@ -153,22 +151,17 @@ DO l = 1, land_pts
 
     IF (k == 1) frac_above_mclass1(l,n) = frac_above
 
-    ! EQ1: crown area index of this cohort.
     CAI_mass(l,n,k) = plantNumDensity(l,n,k) * crwn_area_mass(n,k)
 
-    ! EQ2: gap-fraction overlap, restricted to the ground not already
-    ! claimed by taller cohorts or excluded tiles/competitor PFTs.
+    ! Gap-fraction overlap, restricted to ground not already claimed by
+    ! taller cohorts or excluded tiles/competitor PFTs.
     frac_open = MAX(0.0, 1.0 - frac_above - frac_tile_excl(l) - frac_excl(n))
     frac_mass(l,n,k) = frac_open * (1.0 - EXP(-k_cai(n) * CAI_mass(l,n,k)))
-
-    ! EQ3: overlap-corrected CAI per unit fraction claimed.
-    IF (CAI_mass(l,n,k) > 0.0) THEN
-      CAI_overlapped(l,n,k) = frac_mass(l,n,k) / CAI_mass(l,n,k)
-    END IF
 
     frac(l,n) = frac(l,n) + frac_mass(l,n,k)
     CAI(l,n)  = CAI(l,n)  + CAI_mass(l,n,k)
     frac_above = frac_above + frac_mass(l,n,k)
+
   END DO
 END DO
 
@@ -182,11 +175,10 @@ SUBROUTINE veg3_canopy_maintain_frac_min(land_pts, nnpft, frac_min, k_cai,     &
                                           frac_above_mclass1, frac,            &
                                           plantNumDensity_1, dt, mort_litC)
 ! Maintains each PFT's minimum vegetation fraction by adding recruits to its
-! lowest mass class, inverting the to find the plantNumDensity needed. If
-! 
-! When dt/mort_litC are supplied (runtime use), the implied recruitment is
-! debited from mort_litC to conserve carbon; omitted at initialisation.
-
+! lowest mass class, inverting the gap-fraction formula to find the
+! required plantNumDensity. When dt/mort_litC are supplied (runtime use),
+! the implied recruitment is debited from mort_litC to conserve carbon;
+! omitted at initialisation.
 IMPLICIT NONE
 
 INTEGER, INTENT(IN) :: land_pts, nnpft
@@ -213,7 +205,7 @@ DO n = 1, nnpft
                   - frac_excl(n)
 
       IF (frac_open > frac_min(n)) THEN
-        ! Algebraic inverse of EQ2 for the lowest mass class.
+        ! Invert the gap-fraction formula for the lowest mass class.
         cai_new = -LOG( (frac_open - frac_min(n)) / frac_open ) / k_cai(n)
         plantnumdensity_new = cai_new / crwn_area_mass_1(n)
 
