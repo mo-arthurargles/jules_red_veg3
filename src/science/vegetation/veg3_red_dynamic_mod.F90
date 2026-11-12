@@ -105,7 +105,7 @@ DO l = 1,land_pts
       frac_shade(l,n),                                                         &
       !IN mass-cohort properties
       red_state%g_mass(l,n,1:red_parms%mclass(n)),                             &
-      red_state%mass_mass(n,1:red_parms%mclass(n)),                            &
+      red_state%mass_cohort(n,1:red_parms%mclass(n)),                          &
       !INOUT state
       red_state%plantNumDensity(l,n,1:red_parms%mclass(n)),                    &
       !OUT diagnostics
@@ -122,11 +122,11 @@ CALL veg3_canopy_frac(land_pts, nnpft, nmasst, veg3_ctrl%npft_totmclass,       &
   red_state%order_pft_desc, red_state%order_mclass_desc, red_parms%k_cai,      &
   red_parms%frac_excl, veg_state%frac_tile_excl, red_state%crwn_area_mass,     &
   red_state%plantNumDensity, red_state%frac_mass, red_state%CAI_mass,          &
-  veg_state%frac(:,1:nnpft), veg_state%CAI, frac_above_mclass1)
+  veg_state%frac(:,1:nnpft), veg_state%cai, frac_above_mclass1)
 
 CALL veg3_canopy_maintain_frac_min(land_pts, nnpft, red_parms%frac_min,        &
   red_parms%k_cai, red_parms%frac_excl, veg_state%frac_tile_excl,              &
-  red_state%crwn_area_mass(:,1), red_state%mass_mass(:,1),                     &
+  red_state%crwn_area_mass(:,1), red_state%mass_cohort(:,1),                   &
   frac_above_mclass1, veg_state%frac(:,1:nnpft),                               &
   red_state%plantNumDensity(:,:,1), dt_red, veg_state%mort_litC)
 
@@ -154,7 +154,7 @@ SUBROUTINE update_pft_size_structure(                                          &
                 !IN fields
                 P_s,mort,frac_shade,                                           &
                 !IN mass-cohort properties
-                g_mass,mass_mass,                                              &
+                g_mass,mass_cohort,                                            &
                 !INOUT state
                 plantNumDensity,                                               &
                 !OUT diagnostics
@@ -185,7 +185,7 @@ frac_shade,                                                                    &
 g_mass(mclass),                                                                &
               !  Individual growth across the mass cohorts, precomputed by
               !  red_veg3_assimilate_partition. (kgC s-1)
-mass_mass(mclass)
+mass_cohort(mclass)
               !  Mass of an individual member of each mass cohort. (kgC)
 
 !-----------------------------------------------------------------------------
@@ -236,7 +236,7 @@ DO k = 1, mclass
     IF (k < mclass) THEN
       ! Flux shrinking down into this class from the class above
       flux_in(k) = - plantNumDensity(k+1) * g_mass(k+1)                        &
-        / (mass_mass(k+1) - mass_mass(k))
+        / (mass_cohort(k+1) - mass_cohort(k))
     ELSE
       flux_in(k) = 0.0
     END IF
@@ -251,13 +251,13 @@ DO k = 1, mclass
     ELSE
       ! Flux shrinking out of this class into the class below
       flux_out(k) = - plantNumDensity(k) * g_mass(k)                           &
-        / (mass_mass(k) - mass_mass(k-1))
+        / (mass_cohort(k) - mass_cohort(k-1))
     END IF
 
   ELSE
     IF (k == 1) THEN
       ! Seedling flux
-      flux_in(k) = P_s / mass_mass(k) * (1.0 - frac_shade)
+      flux_in(k) = P_s / mass_cohort(k) * (1.0 - frac_shade)
       mort_litC = mort_litC + frac_shade * P_s
 
     ELSE
@@ -272,8 +272,8 @@ DO k = 1, mclass
       mort_litC = mort_litC + plantNumDensity(k) * g_mass(k)
 
     ELSE
-      flux_out(k) = plantNumDensity(k) * g_mass(k) / (mass_mass(k+1)           &
-        - mass_mass(k))
+      flux_out(k) = plantNumDensity(k) * g_mass(k) / (mass_cohort(k+1)         &
+        - mass_cohort(k))
 
     END IF
 
@@ -289,11 +289,11 @@ DO k = 1, mclass
     dplantNumDensity_dt(k) = -plantNumDensity(k) / dt_red
     mort_litC =  mort_litC                                                     &
       + (dplantNumDensity_dt(k) - flux_out(k))                                 &
-      * mass_mass(k)
+      * mass_cohort(k)
 
   ELSE
     mort_litC = mort_litC + mort(k)                                            &
-    * plantNumDensity(k) * mass_mass(k)
+    * plantNumDensity(k) * mass_cohort(k)
 
   END IF
 
