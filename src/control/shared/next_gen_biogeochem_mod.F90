@@ -230,7 +230,9 @@ g_leaf_dr(land_pts,nnpft),                                                     &
     ! Mean phenology-driven leaf turnover rate for driving litterfall and
     ! vegetation dynamics (s-1).
 local_litter(land_pts,nnpft),                                                  &
-    ! Litter production (kg C/m2/s).
+    ! Whole-population turnover per top-down PFT area (kg C/m2/s).
+frac_before(land_pts,nnpft),                                                   &
+    ! Top-down fractions before dynamics changes the canopy.
 mort_add(land_pts,nnpft,nmasst)
     ! mortality above baseline (/m2)
 
@@ -253,6 +255,8 @@ CALL veg3_phenol_couple(veg_index_pts,veg_index,veg3_ctrl,land_pts,nnpft,      &
 
 ! Now call vegetation model
 IF (asteps_since_triffid == veg3_ctrl%nstep_trif) THEN
+
+  frac_before(:,:) = veg_state%frac(:,1:nnpft)
 
   !Call Litter
   CALL veg3_Litter(                                                            &
@@ -305,7 +309,7 @@ IF (asteps_since_triffid == veg3_ctrl%nstep_trif) THEN
 
   ! Estimate growth and g_mass/recruitment ahead of dynamics
   CALL veg3_red_assimilate_partition(land_pts,nnpft,red_parms,npp_dr,          &
-    local_litter,veg_state%CAI,red_state)
+    local_litter,frac_before,red_state)
 
   ! Estimate total mortality (baseline + disturbance) ahead of dynamics
   CALL veg3_mortality_partition(land_pts,nnpft,nmasst,red_parms,mort_add,      &
@@ -323,7 +327,7 @@ IF (asteps_since_triffid == veg3_ctrl%nstep_trif) THEN
                   )
 
   !Update Vegetation State
-  CALL red_veg3_couple(ainfo)
+  CALL red_veg3_couple(ainfo,frac_before)
 
   !Partition Density Dependent Litter
 

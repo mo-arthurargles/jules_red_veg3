@@ -122,13 +122,15 @@ CALL veg3_canopy_frac(land_pts, nnpft, nmasst, veg3_ctrl%npft_totmclass,       &
   red_state%order_pft_desc, red_state%order_mclass_desc, red_parms%k_cai,      &
   red_parms%frac_excl, veg_state%frac_tile_excl, red_state%crwn_area_mass,     &
   red_state%plantNumDensity, red_state%frac_mass, red_state%CAI_mass,          &
-  veg_state%frac(:,1:nnpft), veg_state%cai, frac_above_mclass1)
+  veg_state%frac(:,1:nnpft), veg_state%cai, frac_above_mclass1,               &
+  red_state%frac_intra_mass)
 
-CALL veg3_canopy_maintain_frac_min(land_pts, nnpft, red_parms%frac_min,        &
-  red_parms%k_cai, red_parms%frac_excl, veg_state%frac_tile_excl,              &
-  red_state%crwn_area_mass(:,1), red_state%mass_cohort(:,1),                   &
-  frac_above_mclass1, veg_state%frac(:,1:nnpft),                               &
-  red_state%plantNumDensity(:,:,1), dt_red, veg_state%mort_litC)
+CALL veg3_canopy_maintain_frac_min(land_pts, nnpft, nmasst,                    &
+  veg3_ctrl%npft_totmclass, red_state%order_pft_desc,                          &
+  red_state%order_mclass_desc, red_parms%frac_min, red_parms%k_cai,            &
+  red_parms%frac_excl, veg_state%frac_tile_excl, red_state%crwn_area_mass,     &
+  red_state%mass_cohort(:,1), red_state%plantNumDensity,                       &
+  veg_state%frac(:,1:nnpft), dt_red, veg_state%mort_litC)
 
 ! Pass 3: normalise mort_litC per unit PFT canopy area.
 DO n = 1,nnpft

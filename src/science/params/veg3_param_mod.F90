@@ -460,6 +460,11 @@ IF ( l_red ) THEN
     error_sum = error_sum + 1
     CALL jules_print(RoutineName, "No value for k_cai")
   END IF
+  IF ( ANY( red_parms%k_cai(:) == 0 .AND. red_parms%frac_min(:) > 0 ) ) THEN
+    error_sum = error_sum + 1
+    CALL jules_print(RoutineName,                                        &
+      "k_cai must be positive when frac_min is positive")
+  END IF
 END IF
 
 ! Defining errors ends here. Now issue FATAL ereport.

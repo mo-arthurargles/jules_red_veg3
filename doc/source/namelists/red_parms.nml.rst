@@ -131,3 +131,15 @@ Ecosystem Demography (RED). Values are not used if RED is not selected.
 
    The allometric/power scaling of PFT mass to PFT leaf area index.
 
+
+.. nml:member:: k_cai
+
+   :type: real(npft)
+   :default: 1.25
+
+   Dimensionless PFT crown-overlap coefficient for RED's closed-canopy scheme.
+   Controls how quickly canopy cover saturates as crown area index increases;
+   larger values give greater cover for the same crown area index.
+   Must be positive when the PFT has a positive minimum vegetation fraction.
+   A value of zero gives zero canopy cover for any crown area index.
+

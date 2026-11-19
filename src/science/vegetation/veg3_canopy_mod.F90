@@ -101,7 +101,7 @@ SUBROUTINE veg3_canopy_frac(land_pts, nnpft, nmasst, npft_totmclass,           &
                              order_pft_desc, order_mclass_desc, k_cai,         &
                              frac_excl, frac_tile_excl, crwn_area_mass,        &
                              plantNumDensity, frac_mass, CAI_mass,             &
-                             frac, CAI, frac_above_mclass1)
+                             frac, CAI, frac_above_mclass1, frac_intra_mass)
 ! Height-ordered gap-fraction overlap calculation.
 ! Processes all (PFT, mass-class) cohorts tallest-to-shortest at each land
 ! point, so each cohort's fraction is only allowed to claim ground not
@@ -129,9 +129,12 @@ REAL, INTENT(OUT) :: CAI(land_pts,nnpft)
 REAL, INTENT(OUT) :: frac_above_mclass1(land_pts,nnpft)
               ! frac_above at the moment the PFT's lowest mass class (k=1)
               ! was processed. Used by veg3_canopy_maintain_frac_min.
+REAL, INTENT(OUT) :: frac_intra_mass(land_pts,nnpft,nmasst)
+              ! Exposed class cover plus overlap beneath taller classes
+              ! of the same PFT. Excludes overlap beneath other PFTs.
 
 INTEGER :: l, i, n, k
-REAL    :: frac_above, frac_open
+REAL    :: frac_above, frac_open, own_cover
 
 !End of header
 
@@ -140,6 +143,7 @@ CAI(:,:)                = 0.0
 frac_mass(:,:,:)        = 0.0
 CAI_mass(:,:,:)         = 0.0
 frac_above_mclass1(:,:) = 0.0
+frac_intra_mass(:,:,:) = 0.0
 
 DO l = 1, land_pts
   frac_above = 0.0
@@ -156,7 +160,10 @@ DO l = 1, land_pts
     ! Gap-fraction overlap, restricted to ground not already claimed by
     ! taller cohorts or excluded tiles/competitor PFTs.
     frac_open = MAX(0.0, 1.0 - frac_above - frac_tile_excl(l) - frac_excl(n))
-    frac_mass(l,n,k) = frac_open * (1.0 - EXP(-k_cai(n) * CAI_mass(l,n,k)))
+    own_cover = 1.0 - EXP(-k_cai(n) * CAI_mass(l,n,k))
+    frac_mass(l,n,k) = frac_open * own_cover
+    ! frac(l,n) currently contains only taller, exposed same-PFT cover.
+    frac_intra_mass(l,n,k) = frac_mass(l,n,k) + frac(l,n) * own_cover
 
     frac(l,n) = frac(l,n) + frac_mass(l,n,k)
     CAI(l,n)  = CAI(l,n)  + CAI_mass(l,n,k)
@@ -169,56 +176,84 @@ RETURN
 END SUBROUTINE veg3_canopy_frac
 
 !-------------------------------------------------------------------------------
-SUBROUTINE veg3_canopy_maintain_frac_min(land_pts, nnpft, frac_min, k_cai,     &
-                                          frac_excl, frac_tile_excl,           &
-                                          crwn_area_mass_1, mass_mass_1,       &
-                                          frac_above_mclass1, frac,            &
-                                          plantNumDensity_1, dt, mort_litC)
+SUBROUTINE veg3_canopy_maintain_frac_min(land_pts, nnpft, nmasst,              &
+                                          npft_totmclass, order_pft_desc,       &
+                                          order_mclass_desc, frac_min, k_cai,   &
+                                          frac_excl, frac_tile_excl,            &
+                                          crwn_area_mass, mass_mass_1,          &
+                                          plantNumDensity, frac, dt, mort_litC)
 ! Maintains each PFT's minimum vegetation fraction by adding recruits to its
-! lowest mass class, inverting the gap-fraction formula to find the
-! required plantNumDensity. When dt/mort_litC are supplied (runtime use),
-! the implied recruitment is debited from mort_litC to conserve carbon;
-! omitted at initialisation.
+! lowest mass class as cohorts are traversed in canopy-height order. Cover is
+! updated immediately, so recruits of taller PFTs shade subsequent recruits.
+! When dt/mort_litC are supplied (runtime use), the implied recruitment is
+! debited from mort_litC to conserve carbon; omitted at initialisation.
+USE ereport_mod, ONLY: ereport
+
 IMPLICIT NONE
 
-INTEGER, INTENT(IN) :: land_pts, nnpft
+INTEGER, INTENT(IN) :: land_pts, nnpft, nmasst, npft_totmclass
+INTEGER, INTENT(IN) :: order_pft_desc(npft_totmclass)
+INTEGER, INTENT(IN) :: order_mclass_desc(npft_totmclass)
 REAL, INTENT(IN) :: frac_min(nnpft), k_cai(nnpft), frac_excl(nnpft)
 REAL, INTENT(IN) :: frac_tile_excl(land_pts)
-REAL, INTENT(IN) :: crwn_area_mass_1(nnpft), mass_mass_1(nnpft)
-REAL, INTENT(IN) :: frac_above_mclass1(land_pts,nnpft)
+REAL, INTENT(IN) :: crwn_area_mass(nnpft,nmasst), mass_mass_1(nnpft)
 
 REAL, INTENT(IN OUT) :: frac(land_pts,nnpft)
-REAL, INTENT(IN OUT) :: plantNumDensity_1(land_pts,nnpft)
+REAL, INTENT(IN OUT) :: plantNumDensity(land_pts,nnpft,nmasst)
 
 REAL, INTENT(IN), OPTIONAL :: dt
 REAL, INTENT(IN OUT), OPTIONAL :: mort_litC(land_pts,nnpft)
 
-INTEGER :: l, n
-REAL    :: frac_open, cai_new, plantnumdensity_new, delta_pnd
+INTEGER :: l, i, n, k
+INTEGER :: errorstatus
+REAL    :: frac_above, frac_open, own_cover, frac_target, cai_new, cai_mass
+REAL    :: plantnumdensity_new, delta_pnd
+CHARACTER(LEN=100) :: message_text
 
 !End of header
 
-DO n = 1, nnpft
-  DO l = 1, land_pts
-    IF (frac(l,n) < frac_min(n)) THEN
-      frac_open = 1.0 - frac_above_mclass1(l,n) - frac_tile_excl(l)           &
-                  - frac_excl(n)
+frac(:,:) = 0.0
 
-      IF (frac_open > frac_min(n)) THEN
-        ! Invert the gap-fraction formula for the lowest mass class.
-        cai_new = -LOG( (frac_open - frac_min(n)) / frac_open ) / k_cai(n)
-        plantnumdensity_new = cai_new / crwn_area_mass_1(n)
+DO l = 1, land_pts
+  frac_above = 0.0
+
+  DO i = 1, npft_totmclass
+    n = order_pft_desc(i)
+    k = order_mclass_desc(i)
+    IF (n == 0) EXIT
+
+    frac_open = MAX(0.0, 1.0 - frac_above - frac_tile_excl(l) - frac_excl(n))
+    cai_mass = plantNumDensity(l,n,k) * crwn_area_mass(n,k)
+    own_cover = 1.0 - EXP(-k_cai(n) * cai_mass)
+
+    IF (k == 1 .AND. frac(l,n) + frac_open * own_cover < frac_min(n)) THEN
+      frac_target = frac_min(n) - frac(l,n)
+      IF (k_cai(n) == 0.0) THEN
+        errorstatus = 104
+        WRITE(message_text, '(A,I0,A,I0)')                                    &
+          'Cannot maintain positive frac_min for k_cai=0, pft=', n,           &
+          ', land point=', l
+        CALL ereport(ModuleName, errorstatus, message_text)
+      END IF
+
+      IF (frac_open > frac_target) THEN
+        cai_new = -LOG(1.0 - frac_target / frac_open) / k_cai(n)
+        plantnumdensity_new = cai_new / crwn_area_mass(n,k)
 
         IF (PRESENT(mort_litC) .AND. PRESENT(dt)) THEN
-          delta_pnd = MAX(0.0, plantnumdensity_new - plantNumDensity_1(l,n))
+          delta_pnd = MAX(0.0, plantnumdensity_new - plantNumDensity(l,n,k))
           mort_litC(l,n) = mort_litC(l,n) - delta_pnd * mass_mass_1(n) / dt
         END IF
 
-        plantNumDensity_1(l,n) = MAX(plantNumDensity_1(l,n),                  &
-                                      plantnumdensity_new)
-        frac(l,n) = frac_min(n)
+        plantNumDensity(l,n,k) = MAX(plantNumDensity(l,n,k),                   &
+                                     plantnumdensity_new)
+        cai_mass = plantNumDensity(l,n,k) * crwn_area_mass(n,k)
+        own_cover = 1.0 - EXP(-k_cai(n) * cai_mass)
       END IF
     END IF
+
+    frac(l,n) = frac(l,n) + frac_open * own_cover
+    frac_above = frac_above + frac_open * own_cover
   END DO
 END DO
 

@@ -31,12 +31,12 @@ SUBROUTINE veg3_red_assimilate_partition(                                      &
                 !IN red_parms
                 red_parms,                                                     &
                 !IN fields
-                npp_dr,local_litter,CAI,                                       &
+                npp_dr,local_litter,frac,                                      &
                 !INOUT state
                 red_state                                                      &
                 )
 
-! Estimates each PFT's gridbox growth (P_a) from npp_dr/local_litter/CAI,
+! Estimates each PFT's gridbox growth (P_a) from npp_dr/local_litter/frac,
 ! splits it into recruitment (P_s) and structural growth (G_struct), where
 ! P_a = P_s + G_struct, then scales G_struct across the mass class
 ! structure (g_mass), ahead of veg3_red_dynamic.
@@ -63,11 +63,13 @@ INTEGER, INTENT(IN) :: land_pts,nnpft
 !----------------------------------------------------------------------------
 REAL, INTENT(IN)   ::                                                          &
 npp_dr(land_pts,nnpft),                                                        &
-              !  Mean NPP driving vegetation, per unit CAI. (kgC m-2 s-1)
+              !  Mean NPP driving vegetation, per top-down tile area.
+              !  (kgC m-2 s-1)
 local_litter(land_pts,nnpft),                                                  &
-              !  Litter production, per unit CAI. (kgC m-2 s-1)
-CAI(land_pts,nnpft)
-              !  PFT crown area index. (m2 m-2)
+              !  Whole-population turnover, per top-down tile area.
+              !  (kgC m-2 s-1)
+frac(land_pts,nnpft)
+              !  Exposed top-down PFT fraction. (-)
 
 !-----------------------------------------------------------------------------
 !Local Vars
@@ -102,19 +104,18 @@ DO l = 1,land_pts
 
     ! Total gridbox growth (P_a), split into recruitment (P_s) and
     ! structural growth (G_struct): P_a = P_s + G_struct.
-    red_state%P_a(l,n) = (npp_dr(l,n) - local_litter(l,n)) * CAI(l,n)
+    red_state%P_a(l,n) = (npp_dr(l,n) - local_litter(l,n)) * frac(l,n)
     red_state%P_s(l,n) = red_parms%alpha_recrt(n) * red_state%P_a(l,n)
-    red_state%G_struct(l,n) = (1.0 - red_parms%alpha_recrt(n))                 &
-      * red_state%P_a(l,n)
-
-    g0 = 0.0
-    IF (plantNumDensity_g_sum > 0) g0 = red_state%G_struct(l,n)                &
-      / plantNumDensity_g_sum
 
     ! Recruitment does not apply when growth is negative - the associated
     ! shrinkage is instead applied via g0/g_mass_scale metabolic (phi_g)
     ! scaling in update_pft_size_structure.
     IF (red_state%P_a(l,n) < 0.0) red_state%P_s(l,n) = 0.0
+    red_state%G_struct(l,n) = red_state%P_a(l,n) - red_state%P_s(l,n)
+
+    g0 = 0.0
+    IF (plantNumDensity_g_sum > 0) g0 = red_state%G_struct(l,n)                &
+      / plantNumDensity_g_sum
 
     ! Metabolic (phi_g) scaling of growth across the mass classes.
     red_state%g_mass(l,n,1:mclass) = g0 * red_state%g_mass_scale(n,1:mclass)

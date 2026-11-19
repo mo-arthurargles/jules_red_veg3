@@ -45,7 +45,7 @@ REAL(KIND=real_jlslsm) ::                                                      &
   phi_g(npft_max) = rmdi,                                                      &
   phi_h(npft_max) = rmdi,                                                      &
   phi_l(npft_max) = rmdi,                                                      &
-  k_cai(npft_max) = rmdi
+  k_cai(npft_max) = 1.25
               ! PFT crown overlap coefficient used to determine the total PFT
               ! canopy area / vegetation fraction. (-)
 
