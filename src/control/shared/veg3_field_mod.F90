@@ -151,10 +151,11 @@ TYPE :: red_state_type
     frac_mass(:,:,:),                                                          &
               !  PFT closed-canopy overlap-corrected area fraction, by mass
               !  class. (-)
-    frac_intra_mass(:,:,:),                                                    &
-              !  Exposed plus intra-PFT overlap cover, by mass class. (-)
     CAI_mass(:,:,:),                                                           &
               !  PFT crown area index, by mass class. (m2 m-2)
+    CAI_intra_mass(:,:,:),                                                     &
+              !  Crown area index of each mass class excluding the part
+              !  shunned beneath other PFTs. (m2 m-2)
     mort(:,:,:),                                                               &
               !  Total PFT mortality rate across plant mass (mort_base +
               !  mort_dstrb), precomputed by veg3_mortality_partition_mod.
@@ -299,8 +300,8 @@ ALLOCATE(red_state%plantNumDensity    (land_pts, nnpft, nmasst ))
 ALLOCATE(red_state%mort               (land_pts, nnpft, nmasst ))
 ALLOCATE(red_state%mort_dstrb         (land_pts, nnpft, nmasst ))
 ALLOCATE(red_state%frac_mass          (land_pts, nnpft, nmasst ))
-ALLOCATE(red_state%frac_intra_mass    (land_pts, nnpft, nmasst ))
 ALLOCATE(red_state%CAI_mass           (land_pts, nnpft, nmasst ))
+ALLOCATE(red_state%CAI_intra_mass     (land_pts, nnpft, nmasst ))
 ALLOCATE(red_state%g_mass             (land_pts, nnpft, nmasst ))
 ALLOCATE(red_state%P_s                (land_pts, nnpft ))
 ALLOCATE(red_state%P_a                 (land_pts, nnpft ))
@@ -323,8 +324,8 @@ red_state%plantNumDensity(:,:,:)  = 0.0
 red_state%mort(:,:,:)             = 0.0
 red_state%mort_dstrb(:,:,:)       = 0.0
 red_state%frac_mass(:,:,:)        = 0.0
-red_state%frac_intra_mass(:,:,:)  = 0.0
 red_state%CAI_mass(:,:,:)         = 0.0
+red_state%CAI_intra_mass(:,:,:)   = 0.0
 red_state%g_mass(:,:,:)           = 0.0
 red_state%P_s(:,:)                = 0.0
 red_state%P_a(:,:)                = 0.0
@@ -529,7 +530,7 @@ IF (l_red .AND. l_triffid) THEN
     red_parms%frac_excl, veg_state%frac_tile_excl, red_state%crwn_area_mass,   &
     red_state%plantNumDensity, red_state%frac_mass, red_state%CAI_mass,        &
     veg_state%frac(:,1:nnpft), veg_state%cai, frac_above_mclass1,             &
-    red_state%frac_intra_mass)
+    red_state%CAI_intra_mass)
 
   ! Top up any PFT below its minimum fraction (no litter adjustment at
   ! initialisation - see item 9). Use frac_seed on a genuine cold start
@@ -553,7 +554,7 @@ IF (l_red .AND. l_triffid) THEN
     red_parms%frac_excl, veg_state%frac_tile_excl, red_state%crwn_area_mass,   &
     red_state%plantNumDensity, red_state%frac_mass, red_state%CAI_mass,        &
     veg_state%frac(:,1:nnpft), veg_state%cai, frac_above_mclass1,             &
-    red_state%frac_intra_mass)
+    red_state%CAI_intra_mass)
 
   DO l = 1, land_pts
     DO n = 1, nnpft
@@ -575,9 +576,8 @@ IF (l_red .AND. l_triffid) THEN
         red_state%froot_mass(n,1:red_parms%mclass(n)),                         &
         red_state%wood_mass(n,1:red_parms%mclass(n)),                          &
         red_state%crwn_area_mass(n,1:red_parms%mclass(n)),                     &
-        !IN exposed-plus-intra-PFT class cover and top-down PFT fraction
-        red_state%frac_intra_mass(l,n,1:red_parms%mclass(n)),                  &
-        red_state%CAI_mass(l,n,1:red_parms%mclass(n)),                         &
+        !IN intra-PFT class CAI and top-down PFT fraction
+        red_state%CAI_intra_mass(l,n,1:red_parms%mclass(n)),                   &
         veg_state%frac(l,n),                                                   &
         !OUT fields (all recomputed properly below by the red_veg3_couple
         ! call, not needed here)
@@ -772,7 +772,7 @@ CALL veg3_canopy_frac(land_pts, nnpft, nmasst, veg3_ctrl%npft_totmclass,       &
   red_parms%frac_excl, veg_state%frac_tile_excl, red_state%crwn_area_mass,     &
   red_state%plantNumDensity, red_state%frac_mass, red_state%CAI_mass,          &
   veg_state%frac(:,1:nnpft), veg_state%cai, frac_above_mclass1,               &
-  red_state%frac_intra_mass)
+  red_state%CAI_intra_mass)
 
 DO n = 1,nnpft
   DO l = 1,land_pts
@@ -791,9 +791,8 @@ DO n = 1,nnpft
       red_state%froot_mass(n,1:red_parms%mclass(n)),                           &
       red_state%wood_mass(n,1:red_parms%mclass(n)),                            &
       red_state%crwn_area_mass(n,1:red_parms%mclass(n)),                       &
-      !IN exposed-plus-intra-PFT class cover and top-down PFT fraction
-      red_state%frac_intra_mass(l,n,1:red_parms%mclass(n)),                    &
-      red_state%CAI_mass(l,n,1:red_parms%mclass(n)),                           &
+      !IN intra-PFT class CAI and top-down PFT fraction
+      red_state%CAI_intra_mass(l,n,1:red_parms%mclass(n)),                     &
       veg_state%frac(l,n),                                                     &
       !OUT fields
       veg_state%vegCpft(l,n),                                                  &
@@ -868,8 +867,8 @@ SUBROUTINE pft_mean_from_mass_class(                                           &
                 !IN mass-cohort properties
                 plantNumDensity,mass_cohort,lai_bal_mass,ht_mass,              &
                 leaf_mass,froot_mass,wood_mass,crwn_area_mass,                 &
-                !IN exposed-plus-intra-PFT cover and CAI contribution, by mass class
-                frac_intra_mass,CAI_mass,                                      &
+                !IN intra-PFT CAI (excluding shunned crowns), by mass class
+                CAI_intra_mass,                                                &
                 !IN top-down PFT fraction
                 frac,                                                          &
                 !OUT fields, per unit frac (whole-population)
@@ -884,9 +883,12 @@ SUBROUTINE pft_mean_from_mass_class(                                           &
 !
 ! vegCpft/leafC/rootC/woodC weight by the whole population
 ! (plantNumDensity), normalised per unit top-down frac. Physical canopy
-! properties weight each class by (exposed cover plus intra-PFT overlap,
-! excluding inter-PFT overlap, as a fraction of the PFT total) multiplied by
-! (the class share of the PFT CAI), normalised to sum to one.
+! properties weight each class by its share of the intra-PFT CAI (crowns
+! shunned beneath other PFTs excluded). LAI and the canopy carbon densities
+! are per unit crown area, so they are then scaled by the mean intra-PFT
+! crown stacking depth (the summed CAI_intra_mass divided by frac) to give
+! values per unit top-down PFT tile area, as used by the surface scheme. This
+! conserves leaf area and carbon over the non-shunned crowns.
 !-----------------------------------------------------------------------------
 USE ereport_mod, ONLY: ereport
 
@@ -920,10 +922,9 @@ wood_mass(mclass),                                                             &
 crwn_area_mass(mclass),                                                        &
               !  Crown area of an individual member of each mass cohort.
               !  (m2)
-frac_intra_mass(mclass),                                                       &
-              !  Exposed plus intra-PFT overlap cover of each cohort. (-)
-CAI_mass(mclass),                                                              &
-              !  Contribution of each mass class to the PFT CAI. (m2 m-2)
+CAI_intra_mass(mclass),                                                        &
+              !  CAI of each mass class excluding crowns shunned beneath
+              !  other PFTs. (m2 m-2)
 frac
               !  Total exposed, top-down PFT ground area fraction. (-)
 
@@ -941,18 +942,22 @@ rootC,                                                                         &
 woodC,                                                                         &
               !  PFT wood carbon density per unit PFT ground area. (kg C m-2)
 vegCpft_canopy,                                                                &
-              !  Physical canopy mean total carbon density.
+              !  Physical canopy mean total carbon density per unit PFT area.
               !  (kg C m-2)
 leafC_canopy,                                                                  &
-              !  Physical canopy mean leaf carbon density. (kg C m-2)
+              !  Physical canopy mean leaf carbon density per unit PFT area.
+              !  (kg C m-2)
 rootC_canopy,                                                                  &
-              !  Physical canopy mean root carbon density. (kg C m-2)
+              !  Physical canopy mean root carbon density per unit PFT area.
+              !  (kg C m-2)
 woodC_canopy,                                                                  &
-              !  Physical canopy mean wood carbon density. (kg C m-2)
+              !  Physical canopy mean wood carbon density per unit PFT area.
+              !  (kg C m-2)
 canht,                                                                         &
               !  Physical canopy mean height. (m)
 lai_bal
-              !  Physical canopy mean balanced LAI. (m2 m-2)
+              !  Physical canopy mean balanced LAI per unit PFT area.
+              !  (m2 m-2)
 
 !-----------------------------------------------------------------------------
 !Local Vars
@@ -960,8 +965,9 @@ lai_bal
 INTEGER              :: k
 INTEGER              :: errorstatus
 REAL                 :: vegCpft_raw, leafC_raw, rootC_raw, woodC_raw,          &
-                        overlap_internal, cai_total, weight_sum, weight
-              !  Unnormalised sums.
+                        cai_total, weight, stack
+              !  Unnormalised sums. stack is the mean intra-PFT crown stacking
+              !  depth, CAI excluding shunned crowns / frac. (-)
 
 !End of headers
 
@@ -976,12 +982,7 @@ rootC_canopy   = 0.0
 woodC_canopy   = 0.0
 canht         = 0.0
 lai_bal       = 0.0
-overlap_internal = SUM(frac_intra_mass)
-cai_total     = SUM(CAI_mass)
-weight_sum    = 0.0
-IF (overlap_internal > 0.0 .AND. cai_total > 0.0) THEN
-  weight_sum = SUM(frac_intra_mass * CAI_mass) / (overlap_internal * cai_total)
-END IF
+cai_total     = SUM(CAI_intra_mass)
 
 ! leafC/rootC/woodC aggregate the same way as vegCpft (whole-population,
 ! per unit frac). Physical means use the same normalised canopy weights
@@ -991,9 +992,8 @@ DO k = 1, mclass
   leafC_raw     = leafC_raw     + plantNumDensity(k) * leaf_mass(k)
   rootC_raw     = rootC_raw     + plantNumDensity(k) * froot_mass(k)
   woodC_raw     = woodC_raw     + plantNumDensity(k) * wood_mass(k)
-  IF (weight_sum > 0.0) THEN
-    weight = frac_intra_mass(k) / overlap_internal * CAI_mass(k) / cai_total &
-             / weight_sum
+  IF (cai_total > 0.0) THEN
+    weight = CAI_intra_mass(k) / cai_total
     canht = canht + weight * ht_mass(k)
     lai_bal = lai_bal + weight * lai_bal_mass(k)
     vegCpft_canopy = vegCpft_canopy + weight * mass_cohort(k) / crwn_area_mass(k)
@@ -1002,6 +1002,16 @@ DO k = 1, mclass
     woodC_canopy = woodC_canopy + weight * wood_mass(k) / crwn_area_mass(k)
   END IF
 END DO
+
+! Scale per-crown-area LAI and carbon densities to per unit tile area.
+IF (cai_total > 0.0 .AND. frac > 0.0) THEN
+  stack          = cai_total / frac
+  lai_bal        = lai_bal        * stack
+  vegCpft_canopy = vegCpft_canopy * stack
+  leafC_canopy   = leafC_canopy   * stack
+  rootC_canopy   = rootC_canopy   * stack
+  woodC_canopy   = woodC_canopy   * stack
+END IF
 
 ! Normalise the whole-population fields per unit frac.
 IF (frac > 0.0) THEN
@@ -1023,7 +1033,7 @@ ELSE
 END IF
 
 ! Retain seedling physical properties where there is no canopy.
-IF (weight_sum <= 0.0) THEN
+IF (cai_total <= 0.0) THEN
   vegCpft_canopy = mass_cohort(1) / crwn_area_mass(1)
   canht       = ht_mass(1)
   leafC_canopy = leaf_mass(1)  / crwn_area_mass(1)

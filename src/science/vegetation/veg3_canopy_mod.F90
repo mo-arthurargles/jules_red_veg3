@@ -101,7 +101,7 @@ SUBROUTINE veg3_canopy_frac(land_pts, nnpft, nmasst, npft_totmclass,           &
                              order_pft_desc, order_mclass_desc, k_cai,         &
                              frac_excl, frac_tile_excl, crwn_area_mass,        &
                              plantNumDensity, frac_mass, CAI_mass,             &
-                             frac, CAI, frac_above_mclass1, frac_intra_mass)
+                             frac, CAI, frac_above_mclass1, CAI_intra_mass)
 ! Height-ordered gap-fraction overlap calculation.
 ! Processes all (PFT, mass-class) cohorts tallest-to-shortest at each land
 ! point, so each cohort's fraction is only allowed to claim ground not
@@ -129,12 +129,13 @@ REAL, INTENT(OUT) :: CAI(land_pts,nnpft)
 REAL, INTENT(OUT) :: frac_above_mclass1(land_pts,nnpft)
               ! frac_above at the moment the PFT's lowest mass class (k=1)
               ! was processed. Used by veg3_canopy_maintain_frac_min.
-REAL, INTENT(OUT) :: frac_intra_mass(land_pts,nnpft,nmasst)
-              ! Exposed class cover plus overlap beneath taller classes
-              ! of the same PFT. Excludes overlap beneath other PFTs.
+REAL, INTENT(OUT) :: CAI_intra_mass(land_pts,nnpft,nmasst)
+              ! CAI_mass for the share of each class's crowns that is not
+              ! shunned beneath taller other-PFT cover (so keeps stacking
+              ! within its own PFT only).
 
 INTEGER :: l, i, n, k
-REAL    :: frac_above, frac_open, own_cover
+REAL    :: frac_above, frac_open, own_cover, frac_avail
 
 !End of header
 
@@ -143,7 +144,7 @@ CAI(:,:)                = 0.0
 frac_mass(:,:,:)        = 0.0
 CAI_mass(:,:,:)         = 0.0
 frac_above_mclass1(:,:) = 0.0
-frac_intra_mass(:,:,:) = 0.0
+CAI_intra_mass(:,:,:)   = 0.0
 
 DO l = 1, land_pts
   frac_above = 0.0
@@ -162,8 +163,15 @@ DO l = 1, land_pts
     frac_open = MAX(0.0, 1.0 - frac_above - frac_tile_excl(l) - frac_excl(n))
     own_cover = 1.0 - EXP(-k_cai(n) * CAI_mass(l,n,k))
     frac_mass(l,n,k) = frac_open * own_cover
-    ! frac(l,n) currently contains only taller, exposed same-PFT cover.
-    frac_intra_mass(l,n,k) = frac_mass(l,n,k) + frac(l,n) * own_cover
+
+    ! Crowns are assumed spread over all ground not reserved for other
+    ! tiles/PFTs; only those over ground not covered by taller other-PFT
+    ! cover (frac_open plus same-PFT taller cover) are retained.
+    frac_avail = 1.0 - frac_tile_excl(l) - frac_excl(n)
+    IF (frac_avail > 0.0) THEN
+      CAI_intra_mass(l,n,k) = CAI_mass(l,n,k) *                                &
+                              MIN(1.0, (frac_open + frac(l,n)) / frac_avail)
+    END IF
 
     frac(l,n) = frac(l,n) + frac_mass(l,n,k)
     CAI(l,n)  = CAI(l,n)  + CAI_mass(l,n,k)
