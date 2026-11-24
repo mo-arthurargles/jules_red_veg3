@@ -627,6 +627,7 @@ USE veg3_canopy_mod, ONLY: veg3_canopy_height_order
 USE veg3_parm_mod, ONLY: veg3_ctrl
 USE jules_surface_mod, ONLY: cmass
 USE pftparm, ONLY: lma
+USE ereport_mod, ONLY: ereport
 IMPLICIT NONE
 
 INTEGER, INTENT(IN) :: nnpft, nmasst
