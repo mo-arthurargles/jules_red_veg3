@@ -101,7 +101,7 @@ SUBROUTINE veg3_canopy_frac(land_pts, nnpft, nmasst, npft_totmclass,           &
                              order_pft_desc, order_mclass_desc, k_cai,         &
                              frac_excl, frac_tile_excl, crwn_area_mass,        &
                              plantNumDensity, frac_mass, CAI_mass,             &
-                             frac, CAI, frac_above_mclass1, CAI_intra_mass)
+                             frac, cai, frac_above_mclass1, CAI_intra_mass)
 ! Height-ordered gap-fraction overlap calculation.
 ! Processes all (PFT, mass-class) cohorts tallest-to-shortest at each land
 ! point, so each cohort's fraction is only allowed to claim ground not
@@ -125,14 +125,13 @@ REAL, INTENT(IN)    :: plantNumDensity(land_pts,nnpft,nmasst)
 REAL, INTENT(OUT) :: frac_mass(land_pts,nnpft,nmasst)
 REAL, INTENT(OUT) :: CAI_mass(land_pts,nnpft,nmasst)
 REAL, INTENT(OUT) :: frac(land_pts,nnpft)
-REAL, INTENT(OUT) :: CAI(land_pts,nnpft)
+REAL, INTENT(OUT) :: cai(land_pts,nnpft)
 REAL, INTENT(OUT) :: frac_above_mclass1(land_pts,nnpft)
               ! frac_above at the moment the PFT's lowest mass class (k=1)
               ! was processed. Used by veg3_canopy_maintain_frac_min.
 REAL, INTENT(OUT) :: CAI_intra_mass(land_pts,nnpft,nmasst)
-              ! CAI_mass for the share of each class's crowns that is not
-              ! shunned beneath taller other-PFT cover (so keeps stacking
-              ! within its own PFT only).
+              ! CAI_mass for crowns not overlapped by taller other-PFT cover;
+              ! retains stacking within the same PFT.
 
 INTEGER :: l, i, n, k
 REAL    :: frac_above, frac_open, own_cover, frac_avail
@@ -140,7 +139,7 @@ REAL    :: frac_above, frac_open, own_cover, frac_avail
 !End of header
 
 frac(:,:)               = 0.0
-CAI(:,:)                = 0.0
+cai(:,:)                = 0.0
 frac_mass(:,:,:)        = 0.0
 CAI_mass(:,:,:)         = 0.0
 frac_above_mclass1(:,:) = 0.0
@@ -174,7 +173,7 @@ DO l = 1, land_pts
     END IF
 
     frac(l,n) = frac(l,n) + frac_mass(l,n,k)
-    CAI(l,n)  = CAI(l,n)  + CAI_mass(l,n,k)
+    cai(l,n)  = cai(l,n)  + CAI_mass(l,n,k)
     frac_above = frac_above + frac_mass(l,n,k)
 
   END DO
@@ -185,10 +184,10 @@ END SUBROUTINE veg3_canopy_frac
 
 !-------------------------------------------------------------------------------
 SUBROUTINE veg3_canopy_maintain_frac_min(land_pts, nnpft, nmasst,              &
-                                          npft_totmclass, order_pft_desc,       &
-                                          order_mclass_desc, frac_min, k_cai,   &
-                                          frac_excl, frac_tile_excl,            &
-                                          crwn_area_mass, mass_mass_1,          &
+                                          npft_totmclass, order_pft_desc,      &
+                                          order_mclass_desc, frac_min, k_cai,  &
+                                          frac_excl, frac_tile_excl,           &
+                                          crwn_area_mass, mass_mass_1,         &
                                           plantNumDensity, frac, dt, mort_litC)
 ! Maintains each PFT's minimum vegetation fraction by adding recruits to its
 ! lowest mass class as cohorts are traversed in canopy-height order. Cover is
@@ -238,8 +237,8 @@ DO l = 1, land_pts
       frac_target = frac_min(n) - frac(l,n)
       IF (k_cai(n) == 0.0) THEN
         errorstatus = 104
-        WRITE(message_text, '(A,I0,A,I0)')                                    &
-          'Cannot maintain positive frac_min for k_cai=0, pft=', n,           &
+        WRITE(message_text, '(A,I0,A,I0)')                                     &
+          'Cannot maintain positive frac_min for k_cai=0, pft=', n,            &
           ', land point=', l
         CALL ereport(ModuleName, errorstatus, message_text)
       END IF

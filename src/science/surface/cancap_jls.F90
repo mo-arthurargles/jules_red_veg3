@@ -130,8 +130,8 @@ ELSE IF (can_model == 3 .OR. can_model == 4) THEN
 
     ELSE IF (l_red) THEN
       ! Physical means include intra-PFT but exclude inter-PFT overlap.
-      leaf = veg_state%leafC_canopy(l,ft)
-      wood = veg_state%woodC_canopy(l,ft)
+      leaf = veg_state%leafC_intra(l,ft)
+      wood = veg_state%woodC_intra(l,ft)
 
     ELSE
       lai_bal(l) = ( a_ws(ft) * eta_sl(ft) * ht(l) /                           &

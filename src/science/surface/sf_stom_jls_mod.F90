@@ -1526,7 +1526,7 @@ DO m = 1,veg_pts
 
       !Initial calculation of N content in respiring stem wood
       IF (l_red) THEN
-        n_stem(l) = veg_state%woodC_canopy(l,ft) / a_ws(ft) * nsw(ft)
+        n_stem(l) = veg_state%woodC_intra(l,ft) / a_ws(ft) * nsw(ft)
       ELSE
         n_stem(l) = eta_sl(ft) * ht(l) * lai_bal(l) * nsw(ft)
       END IF
@@ -1541,14 +1541,14 @@ DO m = 1,veg_pts
 
       n_leaf(l) = nleaf_from_lai( l, ft, lai(l), dvi_cpft, can_averaging_fac(l))
       IF (l_red) THEN
-        root(l) = veg_state%rootC_canopy(l,ft)
+        root(l) = veg_state%rootC_intra(l,ft)
       ELSE
         root(l) = sigl(ft) * lai_bal(l)
       END IF
       n_root(l) = nr_nl(ft) * nl0(ft) * root(l)
 
       IF (l_red) THEN
-        n_stem(l) = ns_nl(ft) * nl0(ft) * veg_state%woodC_canopy(l,ft)        &
+        n_stem(l) = ns_nl(ft) * nl0(ft) * veg_state%woodC_intra(l,ft)          &
           / a_ws(ft)
         IF (.NOT. l_stem_resp_fix) n_stem(l) = n_stem(l) * veg_state%phen(l,ft)
       ELSE IF ( l_stem_resp_fix ) THEN
@@ -1580,10 +1580,10 @@ DO m = 1,veg_pts
     !-------------------------------------------------------------------------
     IF ( l_red ) THEN
 
-      leafc(l) = veg_state%leafC_canopy(l,ft) * veg_state%phen(l,ft)
-      leafc_bal(l) = veg_state%leafC_canopy(l,ft)
-      rootc(l) = veg_state%rootC_canopy(l,ft)
-      woodc(l) = veg_state%woodC_canopy(l,ft)
+      leafc(l) = veg_state%leafC_intra(l,ft) * veg_state%phen(l,ft)
+      leafc_bal(l) = veg_state%leafC_intra(l,ft)
+      rootc(l) = veg_state%rootC_intra(l,ft)
+      woodc(l) = veg_state%woodC_intra(l,ft)
     ELSE IF ( l_trait_phys ) THEN
       leafc(l)     = lma(ft) * lai(l) * cmass
       leafc_bal(l) = lma(ft) * lai_bal(l) * cmass
