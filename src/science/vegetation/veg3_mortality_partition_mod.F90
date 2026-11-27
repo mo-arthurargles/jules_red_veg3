@@ -36,9 +36,10 @@ SUBROUTINE veg3_mortality_partition(                                           &
                 red_state                                                      &
                 )
 
-! Aggregates mortality sources (disturbance mort_dstrb, baseline) into the
-! total mortality rate (mort) across each PFT's mass classes, ahead of
-! veg3_red_dynamic: mort = mort_base + mort_dstrb.
+! Aggregates mortality sources into the total mortality rate (mort) across
+! each PFT's mass classes, ahead of veg3_red_dynamic:
+! mort = mort_base + mort_dstrb, where mort_dstrb = mort_add + mort_starv and
+! mort_starv is the carbon-starvation rate from veg3_red_assimilate_partition.
 
 !Only get the data structures - the data comes through the calling tree
 USE veg3_parm_mod,  ONLY: red_parm_type
@@ -78,7 +79,8 @@ DO l = 1,land_pts
   DO n = 1,nnpft
     mclass = red_parms%mclass(n)
 
-    red_state%mort_dstrb(l,n,1:mclass) = mort_add(l,n,1:mclass)
+    red_state%mort_dstrb(l,n,1:mclass) = mort_add(l,n,1:mclass)                &
+      + red_state%mort_starv(l,n,1:mclass)
     red_state%mort(l,n,1:mclass) = red_parms%mort_base(n)                      &
       + red_state%mort_dstrb(l,n,1:mclass)
   END DO

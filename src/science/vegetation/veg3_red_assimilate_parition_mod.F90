@@ -31,15 +31,21 @@ SUBROUTINE veg3_red_assimilate_partition(                                      &
                 !IN red_parms
                 red_parms,                                                     &
                 !IN fields
-                npp_dr,local_litter,frac,                                      &
+                npp_dr,frac,                                                   &
                 !INOUT state
                 red_state                                                      &
                 )
 
-! Estimates each PFT's gridbox growth (P_a) from npp_dr/local_litter/frac,
-! splits it into recruitment (P_s) and structural growth (G_struct), where
-! P_a = P_s + G_struct, then scales G_struct across the mass class
-! structure (g_mass), ahead of veg3_red_dynamic.
+! Description:
+!   Partitions each PFT's gridbox assimilate across its mass classes and its
+!   intra- and inter-PFT overlap groups, ahead of veg3_red_dynamic.
+!
+! Method:
+!   NPP is shared across intra-PFT plants by metabolic (phi_g) scaling;
+!   inter-PFT plants receive none. Every plant loses its own local
+!   litterfall (litter_mass, from veg3_litter). Recruitment
+!   P_s = alpha*MAX(0,P_a) is debited from the intra group only. A deficit
+!   in the lowest class cannot shrink, so becomes starvation mortality.
 
 !Only get the data structures - the data comes through the calling tree
 USE veg3_parm_mod,  ONLY: red_parm_type
@@ -64,61 +70,99 @@ INTEGER, INTENT(IN) :: land_pts,nnpft
 REAL, INTENT(IN)   ::                                                          &
 npp_dr(land_pts,nnpft),                                                        &
               !  Mean NPP driving vegetation, per top-down tile area.
-              !  (kgC m-2 s-1)
-local_litter(land_pts,nnpft),                                                  &
-              !  Whole-population turnover, per top-down tile area.
-              !  (kgC m-2 s-1)
+              !  [kg C m-2 s-1]
 frac(land_pts,nnpft)
-              !  Exposed top-down PFT fraction. (-)
+              !  Exposed top-down PFT fraction. [-]
 
 !-----------------------------------------------------------------------------
 !Local Vars
 !-----------------------------------------------------------------------------
-INTEGER                ::l,n,k,mclass
+INTEGER                :: l,n,k,mclass
 
 REAL                   ::                                                      &
-g0,                                                                            &
-              !  Boundary growth for an individual member of the smallest mass
-              !  cohort. (kgC s-1)
-plantNumDensity_g_sum
-              !  Summation of the relative cohort contribution towards the
-              !  total PFT assimilate (m-2)
+npp_gb,                                                                        &
+              !  NPP per gridbox area available to the intra group.
+              !  [kg C m-2 s-1]
+litter_gb,                                                                     &
+              !  Local litterfall of the whole population per gridbox area.
+              !  [kg C m-2 s-1]
+w_intra_sum,                                                                   &
+              !  Intra-group number density weighted by the metabolic
+              !  growth scaling. [m-2]
+deficit
+              !  Carbon deficit of the lowest mass class per gridbox area.
+              !  [kg C m-2 s-1]
 
 !End of headers
 
-red_state%P_a(:,:)      = 0.0
-red_state%G_struct(:,:) = 0.0
-red_state%P_s(:,:)      = 0.0
-red_state%g_mass(:,:,:) = 0.0
+red_state%P_a(:,:)               = 0.0
+red_state%G_struct(:,:)          = 0.0
+red_state%P_s(:,:)               = 0.0
+red_state%npp_mass(:,:,:)        = 0.0
+red_state%g_mass_intra(:,:,:)    = 0.0
+red_state%g_mass_inter(:,:,:)    = 0.0
+red_state%g_mass(:,:,:)          = 0.0
+red_state%mort_starv(:,:,:)      = 0.0
 
 DO l = 1,land_pts
   DO n = 1,nnpft
     mclass = red_parms%mclass(n)
 
-    ! Sum product of the number density and the allometric scaling
-    plantNumDensity_g_sum = 0.0
+    w_intra_sum = 0.0
+    litter_gb   = 0.0
     DO k = 1, mclass
-      plantNumDensity_g_sum = plantNumDensity_g_sum                            &
-        + red_state%plantNumDensity(l,n,k) * red_state%g_mass_scale(n,k)
+      w_intra_sum = w_intra_sum + red_state%plantNumDensity_intra(l,n,k)       &
+                    * red_state%g_mass_scale(n,k)
+      litter_gb = litter_gb + red_state%plantNumDensity(l,n,k)                 &
+                  * red_state%litter_mass(l,n,k)
     END DO
+
+    ! A positive exposed fraction implies a non-empty intra group, so no NPP
+    ! is lost by this guard.
+    npp_gb = 0.0
+    IF (w_intra_sum > 0.0) npp_gb = npp_dr(l,n) * frac(l,n)
 
     ! Total gridbox growth (P_a), split into recruitment (P_s) and
     ! structural growth (G_struct): P_a = P_s + G_struct.
-    red_state%P_a(l,n) = (npp_dr(l,n) - local_litter(l,n)) * frac(l,n)
-    red_state%P_s(l,n) = red_parms%alpha_recrt(n) * red_state%P_a(l,n)
-
-    ! Recruitment does not apply when growth is negative - the associated
-    ! shrinkage is instead applied via g0/g_mass_scale metabolic (phi_g)
-    ! scaling in update_pft_size_structure.
-    IF (red_state%P_a(l,n) < 0.0) red_state%P_s(l,n) = 0.0
+    red_state%P_a(l,n) = npp_gb - litter_gb
+    red_state%P_s(l,n) = red_parms%alpha_recrt(n)                              &
+                         * MAX(0.0, red_state%P_a(l,n))
     red_state%G_struct(l,n) = red_state%P_a(l,n) - red_state%P_s(l,n)
 
-    g0 = 0.0
-    IF (plantNumDensity_g_sum > 0) g0 = red_state%G_struct(l,n)                &
-      / plantNumDensity_g_sum
+    DO k = 1, mclass
+      IF (w_intra_sum > 0.0) THEN
+        red_state%npp_mass(l,n,k) = npp_gb * red_state%g_mass_scale(n,k)       &
+                                    / w_intra_sum
+        red_state%g_mass_intra(l,n,k) = red_state%npp_mass(l,n,k)              &
+          - red_state%litter_mass(l,n,k)                                       &
+          - red_state%P_s(l,n) * red_state%g_mass_scale(n,k) / w_intra_sum
+      ELSE
+        red_state%g_mass_intra(l,n,k) = -red_state%litter_mass(l,n,k)
+      END IF
+      red_state%g_mass_inter(l,n,k) = -red_state%litter_mass(l,n,k)
 
-    ! Metabolic (phi_g) scaling of growth across the mass classes.
-    red_state%g_mass(l,n,1:mclass) = g0 * red_state%g_mass_scale(n,1:mclass)
+      ! Population-mean individual growth, diagnostic only.
+      IF (red_state%plantNumDensity(l,n,k) > 0.0) THEN
+        red_state%g_mass(l,n,k) = (red_state%plantNumDensity_intra(l,n,k)      &
+          * red_state%g_mass_intra(l,n,k)                                      &
+          + red_state%plantNumDensity_inter(l,n,k)                             &
+          * red_state%g_mass_inter(l,n,k))                                     &
+          / red_state%plantNumDensity(l,n,k)
+      ELSE
+        red_state%g_mass(l,n,k) = red_state%g_mass_intra(l,n,k)
+      END IF
+    END DO
+
+    ! Plants in the lowest class cannot shrink, so their carbon deficit is
+    ! met by the death of plants (carbon starvation).
+    deficit = red_state%plantNumDensity_intra(l,n,1)                           &
+              * MAX(0.0, -red_state%g_mass_intra(l,n,1))                       &
+              + red_state%plantNumDensity_inter(l,n,1)                         &
+              * MAX(0.0, -red_state%g_mass_inter(l,n,1))
+    IF (red_state%plantNumDensity(l,n,1) > 0.0) THEN
+      red_state%mort_starv(l,n,1) = deficit                                    &
+        / (red_state%plantNumDensity(l,n,1) * red_state%mass_cohort(n,1))
+    END IF
   END DO
 END DO
 

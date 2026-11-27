@@ -71,9 +71,15 @@ INTEGER                ::l,n,k,j
 REAL                   ::                                                      &
 frac_shade(land_pts,nnpft),                                                    &
               !  Competitive shading of seedlings in each PFT. (-)
-frac_above_mclass1(land_pts,nnpft)
+frac_above_mclass1(land_pts,nnpft),                                            &
               !  frac_above at the moment each PFT's lowest mass class was
               !  processed (see veg3_canopy_frac).
+growth_up(nmasst),                                                             &
+              !  Positive structural growth of each mass class, summed over
+              !  the intra- and inter-PFT groups. [kg C m-2 s-1]
+growth_down(nmasst)
+              !  Magnitude of negative structural growth of each mass class,
+              !  summed over the intra- and inter-PFT groups. [kg C m-2 s-1]
 
 
 !End of headers
@@ -92,19 +98,30 @@ DO l = 1,land_pts
           * veg_state%frac(l,j))
     END DO
 
-    ! Call to update the PFT number density, using g_mass/P_s/mort precomputed
-    ! by red_veg3_assimilate_partition/veg3_mortality_partition ahead of
-    ! veg3_red_dynamic.
+    ! Growth and shrinkage of the intra- and inter-PFT groups are kept apart
+    ! so that opposite signs are not averaged before forming class fluxes.
+    growth_up(:)   = 0.0
+    growth_down(:) = 0.0
+    DO k = 1, red_parms%mclass(n)
+      growth_up(k) = red_state%plantNumDensity_intra(l,n,k)                    &
+                     * MAX(0.0, red_state%g_mass_intra(l,n,k))                 &
+                     + red_state%plantNumDensity_inter(l,n,k)                  &
+                     * MAX(0.0, red_state%g_mass_inter(l,n,k))
+      growth_down(k) = red_state%plantNumDensity_intra(l,n,k)                  &
+                       * MAX(0.0, -red_state%g_mass_intra(l,n,k))              &
+                       + red_state%plantNumDensity_inter(l,n,k)                &
+                       * MAX(0.0, -red_state%g_mass_inter(l,n,k))
+    END DO
+
+    ! Update the PFT number density, using growth/P_s/mort precomputed by
+    ! veg3_red_assimilate_partition/veg3_mortality_partition.
     CALL update_pft_size_structure(                                            &
-      !IN sizing
-      red_parms%mclass(n),                                                     &
-      !IN Control vars
-      dt_red,                                                                  &
+      !IN sizing and control
+      red_parms%mclass(n), dt_red,                                             &
       !IN fields
-      red_state%P_s(l,n),red_state%mort(l,n,1:red_parms%mclass(n)),            &
-      frac_shade(l,n),                                                         &
-      !IN mass-cohort properties
-      red_state%g_mass(l,n,1:red_parms%mclass(n)),                             &
+      red_state%P_s(l,n), frac_shade(l,n),                                     &
+      red_state%mort(l,n,1:red_parms%mclass(n)),                               &
+      growth_up(1:red_parms%mclass(n)), growth_down(1:red_parms%mclass(n)),    &
       red_state%mass_cohort(n,1:red_parms%mclass(n)),                          &
       !INOUT state
       red_state%plantNumDensity(l,n,1:red_parms%mclass(n)),                    &
@@ -122,7 +139,7 @@ CALL veg3_canopy_frac(land_pts, nnpft, nmasst, veg3_ctrl%npft_totmclass,       &
   red_state%order_pft_desc, red_state%order_mclass_desc, red_parms%k_cai,      &
   red_parms%frac_excl, veg_state%frac_tile_excl, red_state%crwn_area_mass,     &
   red_state%plantNumDensity, red_state%frac_mass, red_state%CAI_mass,          &
-  veg_state%frac(:,1:nnpft), veg_state%cai, frac_above_mclass1,               &
+  veg_state%frac(:,1:nnpft), veg_state%cai, frac_above_mclass1,                &
   red_state%CAI_intra_mass)
 
 CALL veg3_canopy_maintain_frac_min(land_pts, nnpft, nmasst,                    &
@@ -149,19 +166,26 @@ END SUBROUTINE veg3_red_dynamic
 
 !-----------------------------------------------------------------------------
 SUBROUTINE update_pft_size_structure(                                          &
-                !IN sizing
-                mclass,                                                        &
-                !IN Control vars
-                dt_red,                                                        &
+                !IN sizing and control
+                mclass,dt_red,                                                 &
                 !IN fields
-                P_s,mort,frac_shade,                                           &
-                !IN mass-cohort properties
-                g_mass,mass_cohort,                                            &
+                P_s,frac_shade,mort,growth_up,growth_down,mass_cohort,         &
                 !INOUT state
                 plantNumDensity,                                               &
                 !OUT diagnostics
                 mort_litC                                                      &
                 )
+
+! Description:
+!   Explicit update of one PFT's number density across its mass classes from
+!   growth, shrinkage, recruitment and mortality.
+!
+! Method:
+!   Upward and downward fluxes are formed from the summed positive and
+!   negative growth of the overlap groups, so a class can grow and shrink at
+!   once. All outflows from a class are scaled together so that the class
+!   cannot be exhausted, conserving plants. The demographic litter is the
+!   part of the assimilate not retained in the population.
 
 IMPLICIT NONE
 
@@ -176,26 +200,29 @@ INTEGER, INTENT(IN) :: mclass
 !-----------------------------------------------------------------------------
 REAL, INTENT(IN)     ::                                                        &
 dt_red,                                                                        &
-              !  Dynamic vegetation time-step (s)
+              !  Dynamic vegetation time-step. [s]
 P_s,                                                                           &
-              !  Gridbox carbon assimilate devoted to recruitment. (kgC m-2 s-1)
+              !  Gridbox carbon assimilate devoted to recruitment.
+              !  [kg C m-2 s-1]
+frac_shade,                                                                    &
+              !  Competitive shading of seedlings in this PFT. [-]
 mort(mclass),                                                                  &
               !  Total mortality rate across the mass cohorts, precomputed by
-              !  veg3_mortality_partition. (s-1)
-frac_shade,                                                                    &
-              !  Competitive shading of seedlings in this PFT.
-g_mass(mclass),                                                                &
-              !  Individual growth across the mass cohorts, precomputed by
-              !  red_veg3_assimilate_partition. (kgC s-1)
+              !  veg3_mortality_partition. [s-1]
+growth_up(mclass),                                                             &
+              !  Positive structural growth of each mass class. [kg C m-2 s-1]
+growth_down(mclass),                                                           &
+              !  Magnitude of negative structural growth of each mass class.
+              !  [kg C m-2 s-1]
 mass_cohort(mclass)
-              !  Mass of an individual member of each mass cohort. (kgC)
+              !  Mass of an individual member of each mass cohort. [kg C]
 
 !-----------------------------------------------------------------------------
 ! Reals with INTENT INOUT
 !-----------------------------------------------------------------------------
 REAL, INTENT(IN OUT)  ::                                                       &
 plantNumDensity(mclass)
-              !  Population density within each mass cohort. (m-2)
+              !  Population density within each mass cohort. [m-2]
 
 !-----------------------------------------------------------------------------
 ! Reals with INTENT OUT
@@ -203,7 +230,7 @@ plantNumDensity(mclass)
 REAL, INTENT(OUT)    :: mort_litC
               !  Mortality/demographic litter for this PFT, normalised per
               !  unit gridbox area, veg3_red_dynamics renormalises to
-              !  PFT canopy area. (kgC m-2 s-1)
+              !  PFT canopy area. [kg C m-2 s-1]
 
 !-----------------------------------------------------------------------------
 !Local Vars
@@ -211,98 +238,62 @@ REAL, INTENT(OUT)    :: mort_litC
 INTEGER              :: k
 
 REAL                 ::                                                        &
-dplantNumDensity_dt(mclass),                                                   &
-              !  Net rate of change of population density within each mass
-              ! cohort. (m-2 s-1)
-flux_in(mclass),                                                               &
-              ! Rate of change of population growing into a mass cohort.
-              ! (m-2 s-1)
-flux_out(mclass)
-              ! Rate of change of population growing out of a mass cohort.
-              ! (m-2 s-1)
+flux_up(mclass),                                                               &
+              !  Plants growing from each class into the class above.
+              !  [m-2 s-1]
+flux_down(mclass),                                                             &
+              !  Plants shrinking from each class into the class below.
+              !  [m-2 s-1]
+flux_mort(mclass),                                                             &
+              !  Plants lost from each class by mortality. [m-2 s-1]
+flux_recruit,                                                                  &
+              !  Successful recruits into the lowest class. [m-2 s-1]
+outflow,                                                                       &
+              !  Total loss rate of plants from a class. [m-2 s-1]
+dplantNumDensity_dt,                                                           &
+              !  Net rate of change of a class's number density. [m-2 s-1]
+carbon_stored
+              !  Rate of change of the population's carbon. [kg C m-2 s-1]
 
 !End of headers
 
-! Initialise vars
-mort_litC               = 0.0
-dplantNumDensity_dt(:)  = 0.0
-flux_in(:)              = 0.0
-flux_out(:)             = 0.0
+flux_recruit = P_s * (1.0 - frac_shade) / mass_cohort(1)
 
 DO k = 1, mclass
+  ! Growth beyond the top class and shrinkage below the lowest class cannot
+  ! move plants; the former goes to litter and the latter is met by
+  ! starvation mortality (veg3_red_assimilate_partition).
+  flux_up(k)   = 0.0
+  flux_down(k) = 0.0
+  IF (k < mclass) flux_up(k) = growth_up(k)                                    &
+                               / (mass_cohort(k+1) - mass_cohort(k))
+  IF (k > 1) flux_down(k) = growth_down(k)                                     &
+                            / (mass_cohort(k) - mass_cohort(k-1))
+  flux_mort(k) = mort(k) * plantNumDensity(k)
 
-  ! g_mass shares growth's sign (g_mass_scale is always positive).
-  IF (g_mass(k) < 0.0) THEN
-    ! Negative growth is represented as a downward shrinkage flux of
-    ! individuals through the mass classes.
-    IF (k < mclass) THEN
-      ! Flux shrinking down into this class from the class above
-      flux_in(k) = - plantNumDensity(k+1) * g_mass(k+1)                        &
-        / (mass_cohort(k+1) - mass_cohort(k))
-    ELSE
-      flux_in(k) = 0.0
-    END IF
-
-    IF (k == 1) THEN
-      ! Truncate shrinkage at the lowest mass class - individuals cannot
-      ! shrink below the lowest mass class, so we reduce the litterfall flux
-      ! to account for the negative growth.
-      flux_out(k) = 0.0
-      mort_litC = mort_litC + plantNumDensity(k) * g_mass(k)
-
-    ELSE
-      ! Flux shrinking out of this class into the class below
-      flux_out(k) = - plantNumDensity(k) * g_mass(k)                           &
-        / (mass_cohort(k) - mass_cohort(k-1))
-    END IF
-
-  ELSE
-    IF (k == 1) THEN
-      ! Seedling flux
-      flux_in(k) = P_s / mass_cohort(k) * (1.0 - frac_shade)
-      mort_litC = mort_litC + frac_shade * P_s
-
-    ELSE
-      ! Flux into mass class
-      flux_in(k) = flux_out(k-1)
-
-    END IF
-
-    IF (k == mclass) THEN
-      ! Truncate growth at the top mass class
-      flux_out(k) = 0.0
-      mort_litC = mort_litC + plantNumDensity(k) * g_mass(k)
-
-    ELSE
-      flux_out(k) = plantNumDensity(k) * g_mass(k) / (mass_cohort(k+1)         &
-        - mass_cohort(k))
-
-    END IF
-
+  ! Prevent the class from being exhausted over a timestep.
+  outflow = flux_up(k) + flux_down(k) + flux_mort(k)
+  IF (outflow * dt_red > plantNumDensity(k)) THEN
+    flux_up(k)   = flux_up(k)   * plantNumDensity(k) / (outflow * dt_red)
+    flux_down(k) = flux_down(k) * plantNumDensity(k) / (outflow * dt_red)
+    flux_mort(k) = flux_mort(k) * plantNumDensity(k) / (outflow * dt_red)
   END IF
-
-  ! Update the number density
-  dplantNumDensity_dt(k) = flux_in(k) - flux_out(k)                            &
-    - mort(k) * plantNumDensity(k)
-
-  !Prevent the mass class from being exhausted over a timestep
-  IF (plantNumDensity(k)                                                       &
-      + (dplantNumDensity_dt(k) * dt_red) < 0.0 ) THEN
-    dplantNumDensity_dt(k) = -plantNumDensity(k) / dt_red
-    mort_litC =  mort_litC                                                     &
-      + (dplantNumDensity_dt(k) - flux_out(k))                                 &
-      * mass_cohort(k)
-
-  ELSE
-    mort_litC = mort_litC + mort(k)                                            &
-    * plantNumDensity(k) * mass_cohort(k)
-
-  END IF
-
-  plantNumDensity(k) = plantNumDensity(k)                                      &
-      + dplantNumDensity_dt(k) * dt_red
-
 END DO
+
+carbon_stored = 0.0
+DO k = 1, mclass
+  dplantNumDensity_dt = - flux_up(k) - flux_down(k) - flux_mort(k)
+  IF (k == 1) dplantNumDensity_dt = dplantNumDensity_dt + flux_recruit
+  IF (k > 1) dplantNumDensity_dt = dplantNumDensity_dt + flux_up(k-1)
+  IF (k < mclass) dplantNumDensity_dt = dplantNumDensity_dt + flux_down(k+1)
+
+  carbon_stored = carbon_stored + dplantNumDensity_dt * mass_cohort(k)
+  plantNumDensity(k) = MAX(0.0,                                                &
+                           plantNumDensity(k) + dplantNumDensity_dt * dt_red)
+END DO
+
+! Assimilate (P_s plus net structural growth) not retained in the population.
+mort_litC = P_s + SUM(growth_up) - SUM(growth_down) - carbon_stored
 
 END SUBROUTINE update_pft_size_structure
 !-----------------------------------------------------------------------------

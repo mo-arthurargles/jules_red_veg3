@@ -4,6 +4,9 @@
 ! For further details please refer to the file COPYRIGHT.txt
 ! which you should have received as part of this distribution.
 ! *****************************COPYRIGHT**************************************
+!
+! Some of the content of this file has been produced with the assistance of
+! Met Office Github Copilot Enterprise.
 
 FUNCTION extract_var(var_id) RESULT(cube)
 
@@ -12,7 +15,7 @@ USE jules_fields_mod, ONLY: crop_vars, psparms, toppdm, fire_vars, ainfo,      &
                             trifctltype, jules_vars, fluxes, forcing,          &
                             lake_vars, chemvars, rivers, water_resources
 
-USE veg3_field_mod, ONLY: veg_state
+USE veg3_field_mod, ONLY: veg_state, red_state
 
   !Use subroutines
 ! TYPE Definitions
@@ -1436,6 +1439,34 @@ CASE ( 'npp_dr_out' )
 
 CASE ( 'cai' )
   cube_land = cube_from_array(veg_state%cai)
+  cube = map_from_land(cube_land)
+
+CASE ( 'plantNumDensity_intra' )
+  cube_land = cube_from_array(red_state%plantNumDensity_intra)
+  cube = map_from_land(cube_land)
+
+CASE ( 'plantNumDensity_inter' )
+  cube_land = cube_from_array(red_state%plantNumDensity_inter)
+  cube = map_from_land(cube_land)
+
+CASE ( 'npp_mass' )
+  cube_land = cube_from_array(red_state%npp_mass)
+  cube = map_from_land(cube_land)
+
+CASE ( 'litter_mass' )
+  cube_land = cube_from_array(red_state%litter_mass)
+  cube = map_from_land(cube_land)
+
+CASE ( 'g_mass_intra' )
+  cube_land = cube_from_array(red_state%g_mass_intra)
+  cube = map_from_land(cube_land)
+
+CASE ( 'g_mass_inter' )
+  cube_land = cube_from_array(red_state%g_mass_inter)
+  cube = map_from_land(cube_land)
+
+CASE ( 'mort_starv' )
+  cube_land = cube_from_array(red_state%mort_starv)
   cube = map_from_land(cube_land)
 
 CASE ( 'npp' )

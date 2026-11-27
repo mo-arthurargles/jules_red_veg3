@@ -24,23 +24,25 @@ CHARACTER(LEN=*), PARAMETER, PRIVATE :: ModuleName='VEG3_LITTER_MOD'
 CONTAINS
 SUBROUTINE veg3_Litter(                                                        &
                 !IN Control vars
-                veg_index_pts,veg_index,veg3_ctrl,land_pts,nnpft,              &
+                veg_index_pts,veg_index,land_pts,nnpft,                        &
                 !IN parms
                 litter_parms,                                                  &
                 !IN fields
                 g_leaf_dr,                                                     &
-                !IN state
-                veg_state,                                                     &
-                ! OUT Fields
-                local_litter                                                   &
-                !OUT Diagnostics
+                !INOUT state
+                veg_state,red_state                                            &
                 )
+
+! Description:
+!   Local litterfall (leaf, root and wood turnover, excluding mortality) for
+!   an individual in each mass class, aggregated to the PFT litter pools.
+!   Turnover includes all plants, both intra- and inter-PFT overlapped.
 
 !Only get the data structures - the data comes through the calling tree
 USE conversions_mod, ONLY: rsec_per_day
 
-USE veg3_parm_mod, ONLY:  veg3_ctrl_type,litter_parm_type
-USE veg3_field_mod, ONLY:  veg_state_type
+USE veg3_parm_mod, ONLY:  litter_parm_type
+USE veg3_field_mod, ONLY:  veg_state_type, red_state_type
 
 IMPLICIT NONE
 
@@ -49,11 +51,9 @@ IMPLICIT NONE
 !----------------------------------------------------------------------------
 INTEGER, INTENT(IN) :: land_pts,nnpft,veg_index(land_pts),veg_index_pts
 
-
 !-----------------------------------------------------------------------------
 ! Objects with INTENT IN
 !-----------------------------------------------------------------------------
-TYPE(veg3_ctrl_type),INTENT(IN)   :: veg3_ctrl
 TYPE(litter_parm_type),INTENT(IN) :: litter_parms
 
 !-----------------------------------------------------------------------------
@@ -63,62 +63,77 @@ REAL, INTENT(IN)       ::                                                      &
 g_leaf_dr(land_pts,nnpft)
         ! Mean phenology-driven leaf turnover rate for driving vegetation
         ! dynamics, accumulated and averaged over the vegetation dynamics
-        ! timestep in veg3_run_ctrl. (s-1)
+        ! timestep in veg3_run_ctrl. [s-1]
 
 !-----------------------------------------------------------------------------
 ! Objects with INTENT INOUT
 !-----------------------------------------------------------------------------
 TYPE(veg_state_type),INTENT(IN OUT)   :: veg_state
-
-!-----------------------------------------------------------------------------
-! Reals with INTENT OUT
-!-----------------------------------------------------------------------------
-REAL, INTENT(OUT)      ::                                                      &
-local_litter(veg3_ctrl%land_pts,veg3_ctrl%npft)
+TYPE(red_state_type),INTENT(IN OUT)   :: red_state
 
 !-----------------------------------------------------------------------------
 !Local Vars
 !-----------------------------------------------------------------------------
-INTEGER                ::l,n,k
+INTEGER                :: l,n,k,i,nmass
 
 REAL                   ::                                                      &
-leaf_litter(land_pts,nnpft),                                                   &
-wood_litter(land_pts,nnpft),                                                   &
-root_litter(land_pts,nnpft)
-
+leaf_ind,                                                                      &
+        ! Leaf turnover of an individual. [kg C s-1]
+root_ind,                                                                      &
+        ! Fine root turnover of an individual. [kg C s-1]
+wood_ind,                                                                      &
+        ! Wood turnover of an individual. [kg C s-1]
+leaf_litter,                                                                   &
+        ! Leaf turnover per gridbox area. [kg C m-2 s-1]
+root_litter,                                                                   &
+        ! Fine root turnover per gridbox area. [kg C m-2 s-1]
+wood_litter
+        ! Wood turnover per gridbox area. [kg C m-2 s-1]
 
 !End of headers
 
-! Initialise vars
-
-leaf_litter(:,:)  = 0.0
-root_litter(:,:)  = 0.0
-wood_litter(:,:)  = 0.0
-local_litter(:,:) = 0.0
-
+nmass = SIZE(red_state%leaf_mass,2)
+red_state%litter_mass(:,:,:) = 0.0
 
 !$OMP PARALLEL DO DEFAULT(NONE) SCHEDULE(STATIC) COLLAPSE(2)                   &
-!$OMP PRIVATE(l,n,k)                                                           &
-!$OMP SHARED(litter_parms,veg_state,leaf_litter,root_litter,wood_litter,       &
-!$OMP        local_litter,veg_index,veg_index_pts,nnpft,g_leaf_dr)
+!$OMP PRIVATE(l,n,k,i,leaf_ind,root_ind,wood_ind,leaf_litter,root_litter,      &
+!$OMP         wood_litter)                                                     &
+!$OMP SHARED(litter_parms,veg_state,red_state,veg_index,veg_index_pts,nnpft,   &
+!$OMP        nmass,g_leaf_dr)
 DO n = 1, nnpft
-  DO k = 1, veg_index_pts
-    l = veg_index(k)
+  DO i = 1, veg_index_pts
+    l = veg_index(i)
 
-    ! Turnover includes all plants, including intra- and inter-PFT shaded
-    ! cohorts. These pools are normalised by top-down PFT fraction.
-    leaf_litter(l,n) = g_leaf_dr(l,n) * veg_state%leafC(l,n) *                 &
-                       veg_state%phen(l,n)
-    root_litter(l,n) = litter_parms%g_root(n) * veg_state%rootC(l,n)
-    wood_litter(l,n) = litter_parms%g_wood(n) * veg_state%woodC(l,n)
+    leaf_litter = 0.0
+    root_litter = 0.0
+    wood_litter = 0.0
 
-    ! Copy across to veg_state%leaf_litC, veg_state%root_litC, veg_state%wood_litC
-    ! Convert to kg C m-2 (360d)-1
-    veg_state%leaf_litC(l,n) = leaf_litter(l,n) * rsec_per_day * 360.0
-    veg_state%root_litC(l,n) = root_litter(l,n) * rsec_per_day * 360.0
-    veg_state%wood_litC(l,n) = wood_litter(l,n) * rsec_per_day * 360.0
+    ! Unused mass classes have zero tissue mass and number density.
+    DO k = 1, nmass
+      leaf_ind = g_leaf_dr(l,n) * veg_state%phen(l,n) *                        &
+                 red_state%leaf_mass(n,k)
+      root_ind = litter_parms%g_root(n) * red_state%froot_mass(n,k)
+      wood_ind = litter_parms%g_wood(n) * red_state%wood_mass(n,k)
+      red_state%litter_mass(l,n,k) = leaf_ind + root_ind + wood_ind
 
-    local_litter(l,n) = leaf_litter(l,n) + root_litter(l,n) + wood_litter(l,n)
+      leaf_litter = leaf_litter + red_state%plantNumDensity(l,n,k) * leaf_ind
+      root_litter = root_litter + red_state%plantNumDensity(l,n,k) * root_ind
+      wood_litter = wood_litter + red_state%plantNumDensity(l,n,k) * wood_ind
+    END DO
+
+    ! Normalise by top-down PFT fraction and convert to kg C m-2 (360d)-1.
+    IF (veg_state%frac(l,n) > 0.0) THEN
+      veg_state%leaf_litC(l,n) = leaf_litter / veg_state%frac(l,n)             &
+                                 * rsec_per_day * 360.0
+      veg_state%root_litC(l,n) = root_litter / veg_state%frac(l,n)             &
+                                 * rsec_per_day * 360.0
+      veg_state%wood_litC(l,n) = wood_litter / veg_state%frac(l,n)             &
+                                 * rsec_per_day * 360.0
+    ELSE
+      veg_state%leaf_litC(l,n) = 0.0
+      veg_state%root_litC(l,n) = 0.0
+      veg_state%wood_litC(l,n) = 0.0
+    END IF
 
   END DO
 END DO

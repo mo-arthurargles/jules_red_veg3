@@ -229,8 +229,6 @@ npp_dr(land_pts,nnpft),                                                        &
 g_leaf_dr(land_pts,nnpft),                                                     &
     ! Mean phenology-driven leaf turnover rate for driving litterfall and
     ! vegetation dynamics (s-1).
-local_litter(land_pts,nnpft),                                                  &
-    ! Whole-population turnover per top-down PFT area (kg C/m2/s).
 frac_before(land_pts,nnpft),                                                   &
     ! Top-down fractions before dynamics changes the canopy.
 mort_add(land_pts,nnpft,nmasst)
@@ -258,19 +256,16 @@ IF (asteps_since_triffid == veg3_ctrl%nstep_trif) THEN
 
   frac_before(:,:) = veg_state%frac(:,1:nnpft)
 
-  !Call Litter
+  ! Local litterfall on mass classes, aggregated to the PFT litter pools.
   CALL veg3_Litter(                                                            &
                 !IN Control vars
-                veg_index_pts,veg_index,veg3_ctrl,land_pts,nnpft,              &
+                veg_index_pts,veg_index,land_pts,nnpft,                        &
                 !IN parms
                 litter_parms,                                                  &
                 !IN fields
                 g_leaf_dr,                                                     &
-                !IN state
-                veg_state,                                                     &
-                ! OUT Fields
-                local_litter                                                   &
-                !OUT Diagnostics
+                !INOUT state
+                veg_state,red_state                                            &
                 )
 
   ! Record driving g_leaf_dr and convert to s-1 -> (360 days)-1
@@ -307,11 +302,13 @@ IF (asteps_since_triffid == veg3_ctrl%nstep_trif) THEN
   !Call Veg Dynamics
   !Call Veg Dynamics - in this case RED
 
-  ! Estimate growth and g_mass/recruitment ahead of dynamics
+  ! Partition NPP, local litterfall and recruitment across the mass classes
+  ! and overlap groups, diagnosing carbon-starvation mortality.
   CALL veg3_red_assimilate_partition(land_pts,nnpft,red_parms,npp_dr,          &
-    local_litter,frac_before,red_state)
+    frac_before,red_state)
 
-  ! Estimate total mortality (baseline + disturbance) ahead of dynamics
+  ! Estimate total mortality (baseline + disturbance + starvation) ahead of
+  ! dynamics
   CALL veg3_mortality_partition(land_pts,nnpft,nmasst,red_parms,mort_add,      &
     red_state)
 

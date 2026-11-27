@@ -9,6 +9,9 @@
 ! This file belongs in Veg3 Ecosystem Demography
 ! *****************************COPYRIGHT****************************************
 !
+! Some of the content of this file has been produced with the assistance of
+! Met Office Github Copilot Enterprise.
+!
 ! Description:
 !   Closed-canopy crown overlap scheme for veg3/RED. Replaces the naive
 !   frac=SUM(plantNumDensity*crwn_area_mass) calculation with a
@@ -22,7 +25,7 @@ IMPLICIT NONE
 
 PRIVATE
 PUBLIC :: veg3_canopy_height_order, veg3_canopy_frac,                          &
-          veg3_canopy_maintain_frac_min
+          veg3_canopy_maintain_frac_min, veg3_canopy_intra_inter_density
 
 CHARACTER(LEN=*), PARAMETER, PRIVATE :: ModuleName='VEG3_CANOPY_MOD'
 
@@ -181,6 +184,56 @@ END DO
 
 RETURN
 END SUBROUTINE veg3_canopy_frac
+
+!-------------------------------------------------------------------------------
+SUBROUTINE veg3_canopy_intra_inter_density(land_pts, nnpft, nmasst,            &
+                                            crwn_area_mass, plantNumDensity,   &
+                                            CAI_intra_mass,                    &
+                                            plantNumDensity_intra,             &
+                                            plantNumDensity_inter)
+! Description:
+!   Splits each mass class into the plants not overlapped by other PFTs
+!   (intra, including same-PFT stacking) and those overlapped (inter).
+!   intra = CAI_intra_mass / crwn_area_mass, inter = rest. These groups
+!   drive the two-stream growth in veg3_red_assimilate_partition.
+
+IMPLICIT NONE
+
+INTEGER, INTENT(IN) :: land_pts, nnpft, nmasst
+REAL, INTENT(IN)    :: crwn_area_mass(nnpft,nmasst)
+              ! Crown area of an individual in each mass class. [m2]
+REAL, INTENT(IN)    :: plantNumDensity(land_pts,nnpft,nmasst)
+              ! Total number density in each mass class. [m-2]
+REAL, INTENT(IN)    :: CAI_intra_mass(land_pts,nnpft,nmasst)
+              ! Crown area index not overlapped by other PFTs. [m2 m-2]
+
+REAL, INTENT(OUT) :: plantNumDensity_intra(land_pts,nnpft,nmasst)
+              ! Number density not overlapped by other PFTs. [m-2]
+REAL, INTENT(OUT) :: plantNumDensity_inter(land_pts,nnpft,nmasst)
+              ! Number density overlapped by other PFTs. [m-2]
+
+INTEGER :: l, n, k
+
+!End of header
+
+plantNumDensity_intra(:,:,:) = 0.0
+plantNumDensity_inter(:,:,:) = 0.0
+
+DO k = 1, nmasst
+  DO n = 1, nnpft
+    ! Unused mass classes have zero crown area.
+    IF (crwn_area_mass(n,k) <= 0.0) CYCLE
+    DO l = 1, land_pts
+      plantNumDensity_intra(l,n,k) = MIN(plantNumDensity(l,n,k),               &
+        CAI_intra_mass(l,n,k) / crwn_area_mass(n,k))
+      plantNumDensity_inter(l,n,k) = plantNumDensity(l,n,k)                    &
+        - plantNumDensity_intra(l,n,k)
+    END DO
+  END DO
+END DO
+
+RETURN
+END SUBROUTINE veg3_canopy_intra_inter_density
 
 !-------------------------------------------------------------------------------
 SUBROUTINE veg3_canopy_maintain_frac_min(land_pts, nnpft, nmasst,              &

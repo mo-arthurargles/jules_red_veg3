@@ -9482,4 +9482,95 @@ DATA metadata(732) / var_metadata(                                             &
 ! Units
     "m2 m-2"                                                                   &
   ) /
+!-----------------------------------------------------------------------------
+! Metadata for plantNumDensity_intra
+!-----------------------------------------------------------------------------
+DATA metadata(733) / var_metadata(                                             &
+! String identifier
+    'plantNumDensity_intra',                                                   &
+! Variable type
+    var_type_nmasst,                                                           &
+! Long name
+    "Number density of plants not overlapped by other PFTs (intra-PFT group)", &
+! Units
+    "m-2"                                                                      &
+  ) /
+!-----------------------------------------------------------------------------
+! Metadata for plantNumDensity_inter
+!-----------------------------------------------------------------------------
+DATA metadata(734) / var_metadata(                                             &
+! String identifier
+    'plantNumDensity_inter',                                                   &
+! Variable type
+    var_type_nmasst,                                                           &
+! Long name
+    "Number density of plants overlapped by other PFTs (inter-PFT group)",     &
+! Units
+    "m-2"                                                                      &
+  ) /
+!-----------------------------------------------------------------------------
+! Metadata for npp_mass
+!-----------------------------------------------------------------------------
+DATA metadata(735) / var_metadata(                                             &
+! String identifier
+    'npp_mass',                                                                &
+! Variable type
+    var_type_nmasst,                                                           &
+! Long name
+    "NPP per individual of the intra-PFT group in each mass class",            &
+! Units
+    "kg s-1"                                                                   &
+  ) /
+!-----------------------------------------------------------------------------
+! Metadata for litter_mass
+!-----------------------------------------------------------------------------
+DATA metadata(736) / var_metadata(                                             &
+! String identifier
+    'litter_mass',                                                             &
+! Variable type
+    var_type_nmasst,                                                           &
+! Long name
+    "Local litterfall per individual in each mass class",                      &
+! Units
+    "kg s-1"                                                                   &
+  ) /
+!-----------------------------------------------------------------------------
+! Metadata for g_mass_intra
+!-----------------------------------------------------------------------------
+DATA metadata(737) / var_metadata(                                             &
+! String identifier
+    'g_mass_intra',                                                            &
+! Variable type
+    var_type_nmasst,                                                           &
+! Long name
+    "Net structural growth per individual, intra-PFT group",                   &
+! Units
+    "kg s-1"                                                                   &
+  ) /
+!-----------------------------------------------------------------------------
+! Metadata for g_mass_inter
+!-----------------------------------------------------------------------------
+DATA metadata(738) / var_metadata(                                             &
+! String identifier
+    'g_mass_inter',                                                            &
+! Variable type
+    var_type_nmasst,                                                           &
+! Long name
+    "Net structural growth per individual, inter-PFT group",                   &
+! Units
+    "kg s-1"                                                                   &
+  ) /
+!-----------------------------------------------------------------------------
+! Metadata for mort_starv
+!-----------------------------------------------------------------------------
+DATA metadata(739) / var_metadata(                                             &
+! String identifier
+    'mort_starv',                                                              &
+! Variable type
+    var_type_nmasst,                                                           &
+! Long name
+    "Carbon-starvation mortality rate in each mass class",                     &
+! Units
+    "s-1"                                                                      &
+  ) /
 #endif

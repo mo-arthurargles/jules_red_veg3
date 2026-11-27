@@ -158,15 +158,39 @@ TYPE :: red_state_type
     CAI_intra_mass(:,:,:),                                                     &
               !  Includes same-PFT overlap; excludes area under other PFTs.
               !  (m2 m-2)
+    plantNumDensity_intra(:,:,:),                                              &
+              !  Number density not overlapped by other PFTs (includes
+              !  same-PFT overlap), diagnosed as CAI_intra_mass /
+              !  crwn_area_mass. (m-2)
+    plantNumDensity_inter(:,:,:),                                              &
+              !  Number density overlapped by other PFTs, diagnosed as
+              !  plantNumDensity - plantNumDensity_intra. (m-2)
     mort(:,:,:),                                                               &
               !  Total PFT mortality rate across plant mass (mort_base +
               !  mort_dstrb), precomputed by veg3_mortality_partition_mod.
               !  (/s)
     mort_dstrb(:,:,:),                                                         &
-              !  Disturbance PFT mortality rate across plant mass. (/s)
+              !  Disturbance PFT mortality rate across plant mass, including
+              !  carbon starvation (mort_starv). (/s)
+    mort_starv(:,:,:),                                                         &
+              !  Carbon-starvation mortality rate across plant mass, from
+              !  carbon deficits that cannot be met by shrinking,
+              !  precomputed by veg3_red_assimilate_parition_mod. (/s)
+    npp_mass(:,:,:),                                                           &
+              !  NPP of an individual intra-PFT plant in each mass class;
+              !  inter-PFT plants receive none. (kgC s-1)
+    litter_mass(:,:,:),                                                        &
+              !  Local litterfall (leaf, root and wood turnover) of an
+              !  individual plant in each mass class. (kgC s-1)
+    g_mass_intra(:,:,:),                                                       &
+              !  Structural growth of an individual intra-PFT plant:
+              !  npp_mass - litter_mass - recruitment share. (kgC s-1)
+    g_mass_inter(:,:,:),                                                       &
+              !  Structural growth of an individual inter-PFT plant:
+              !  -litter_mass. (kgC s-1)
     g_mass(:,:,:),                                                             &
-              !  Individual growth across plant mass, precomputed by
-              !  veg3_red_assimilate_parition_mod. (kgC s-1)
+              !  Population-mean individual growth across plant mass,
+              !  precomputed by veg3_red_assimilate_parition_mod. (kgC s-1)
     P_s(:,:),                                                                  &
               !  Gridbox carbon assimilate devoted to recruitment, precomputed
               !  by veg3_red_assimilate_parition_mod. (kgC m-2 s-1)
@@ -304,6 +328,13 @@ ALLOCATE(red_state%mort_dstrb         (land_pts, nnpft, nmasst ))
 ALLOCATE(red_state%frac_mass          (land_pts, nnpft, nmasst ))
 ALLOCATE(red_state%CAI_mass           (land_pts, nnpft, nmasst ))
 ALLOCATE(red_state%CAI_intra_mass     (land_pts, nnpft, nmasst ))
+ALLOCATE(red_state%plantNumDensity_intra (land_pts, nnpft, nmasst ))
+ALLOCATE(red_state%plantNumDensity_inter (land_pts, nnpft, nmasst ))
+ALLOCATE(red_state%mort_starv         (land_pts, nnpft, nmasst ))
+ALLOCATE(red_state%npp_mass           (land_pts, nnpft, nmasst ))
+ALLOCATE(red_state%litter_mass        (land_pts, nnpft, nmasst ))
+ALLOCATE(red_state%g_mass_intra       (land_pts, nnpft, nmasst ))
+ALLOCATE(red_state%g_mass_inter       (land_pts, nnpft, nmasst ))
 ALLOCATE(red_state%g_mass             (land_pts, nnpft, nmasst ))
 ALLOCATE(red_state%P_s                (land_pts, nnpft ))
 ALLOCATE(red_state%P_a                 (land_pts, nnpft ))
@@ -328,6 +359,13 @@ red_state%mort_dstrb(:,:,:)       = 0.0
 red_state%frac_mass(:,:,:)        = 0.0
 red_state%CAI_mass(:,:,:)         = 0.0
 red_state%CAI_intra_mass(:,:,:)   = 0.0
+red_state%plantNumDensity_intra(:,:,:) = 0.0
+red_state%plantNumDensity_inter(:,:,:) = 0.0
+red_state%mort_starv(:,:,:)       = 0.0
+red_state%npp_mass(:,:,:)         = 0.0
+red_state%litter_mass(:,:,:)      = 0.0
+red_state%g_mass_intra(:,:,:)     = 0.0
+red_state%g_mass_inter(:,:,:)     = 0.0
 red_state%g_mass(:,:,:)           = 0.0
 red_state%P_s(:,:)                = 0.0
 red_state%P_a(:,:)                = 0.0
@@ -487,7 +525,9 @@ USE conversions_mod,          ONLY: rsec_per_day
 
 USE jules_surface_types_mod,  ONLY: soil, urban, urban_canyon, urban_roof,     &
                                     lake, ice
-USE veg3_canopy_mod,          ONLY: veg3_canopy_frac, veg3_canopy_maintain_frac_min
+USE veg3_canopy_mod,          ONLY: veg3_canopy_frac,                          &
+                                    veg3_canopy_maintain_frac_min,             &
+                                    veg3_canopy_intra_inter_density
 USE veg3_parm_mod,            ONLY: veg3_ctrl
 
 IMPLICIT NONE
@@ -558,6 +598,11 @@ IF (l_red .AND. l_triffid) THEN
     veg_state%frac(:,1:nnpft), veg_state%cai, frac_above_mclass1,              &
     red_state%CAI_intra_mass)
 
+  CALL veg3_canopy_intra_inter_density(land_pts, nnpft, nmasst,                &
+    red_state%crwn_area_mass, red_state%plantNumDensity,                       &
+    red_state%CAI_intra_mass, red_state%plantNumDensity_intra,                 &
+    red_state%plantNumDensity_inter)
+
   DO l = 1, land_pts
     DO n = 1, nnpft
 
@@ -578,8 +623,8 @@ IF (l_red .AND. l_triffid) THEN
         red_state%froot_mass(n,1:red_parms%mclass(n)),                         &
         red_state%wood_mass(n,1:red_parms%mclass(n)),                          &
         red_state%crwn_area_mass(n,1:red_parms%mclass(n)),                     &
-        !IN intra-PFT CAI and class fractions
-        red_state%CAI_intra_mass(l,n,1:red_parms%mclass(n)),                   &
+        !IN intra-PFT density and class fractions
+        red_state%plantNumDensity_intra(l,n,1:red_parms%mclass(n)),            &
         red_state%frac_mass(l,n,1:red_parms%mclass(n)),                        &
         veg_state%frac(l,n),                                                   &
         !OUT fields (all recomputed properly below by the red_veg3_couple
@@ -726,7 +771,7 @@ USE ancil_info,                   ONLY: land_pts, nmasst, ainfo_type
 USE jules_surface_types_mod,      ONLY: nnpft, soil
 USE conversions_mod, ONLY: rsec_per_day
 USE veg3_parm_mod, ONLY: veg3_ctrl
-USE veg3_canopy_mod, ONLY: veg3_canopy_frac
+USE veg3_canopy_mod, ONLY: veg3_canopy_frac, veg3_canopy_intra_inter_density
 USE ereport_mod, ONLY: ereport
 
 IMPLICIT NONE
@@ -776,6 +821,12 @@ CALL veg3_canopy_frac(land_pts, nnpft, nmasst, veg3_ctrl%npft_totmclass,       &
   veg_state%frac(:,1:nnpft), veg_state%cai, frac_above_mclass1,                &
   red_state%CAI_intra_mass)
 
+! Diagnose the intra- and inter-PFT overlap groups for the new population.
+CALL veg3_canopy_intra_inter_density(land_pts, nnpft, nmasst,                  &
+  red_state%crwn_area_mass, red_state%plantNumDensity,                         &
+  red_state%CAI_intra_mass, red_state%plantNumDensity_intra,                   &
+  red_state%plantNumDensity_inter)
+
 DO n = 1,nnpft
   DO l = 1,land_pts
 
@@ -793,8 +844,8 @@ DO n = 1,nnpft
       red_state%froot_mass(n,1:red_parms%mclass(n)),                           &
       red_state%wood_mass(n,1:red_parms%mclass(n)),                            &
       red_state%crwn_area_mass(n,1:red_parms%mclass(n)),                       &
-      !IN intra-PFT CAI and class fractions
-      red_state%CAI_intra_mass(l,n,1:red_parms%mclass(n)),                     &
+      !IN intra-PFT density and class fractions
+      red_state%plantNumDensity_intra(l,n,1:red_parms%mclass(n)),              &
       red_state%frac_mass(l,n,1:red_parms%mclass(n)),                          &
       veg_state%frac(l,n),                                                     &
       !OUT fields
@@ -870,8 +921,8 @@ SUBROUTINE pft_mean_from_mass_class(                                           &
                 !IN mass-cohort properties
                 plantNumDensity,mass_cohort,lai_bal_mass,ht_mass,              &
                 leaf_mass,froot_mass,wood_mass,crwn_area_mass,                 &
-                !IN intra-PFT CAI and exposed fraction by mass class
-                CAI_intra_mass,                                                &
+                !IN intra-PFT density and exposed fraction by mass class
+                plantNumDensity_intra,                                         &
                 frac_mass,                                                     &
                 !IN top-down PFT fraction
                 frac,                                                          &
@@ -885,9 +936,9 @@ SUBROUTINE pft_mean_from_mass_class(                                           &
 ! Aggregates the plant number density across the mass class structure of a
 ! single PFT at a single point into the PFT mean physical properties.
 !
-! Whole-population carbon pools use plantNumDensity. Intra-PFT pools use the
-! intra-PFT density excludes other-PFT canopy overlap but retains same-PFT
-! overlap. Height is weighted by each class's exposed fraction; LAI and carbon
+! Whole-population carbon pools use plantNumDensity. Intra-PFT pools use
+! plantNumDensity_intra, which excludes other-PFT canopy overlap but retains
+! same-PFT overlap. Height is weighted by each class's exposed fraction; LAI and carbon
 ! pools are normalised by the top-down PFT fraction to give values per tile.
 !-----------------------------------------------------------------------------
 USE ereport_mod, ONLY: ereport
@@ -922,9 +973,9 @@ wood_mass(mclass),                                                             &
 crwn_area_mass(mclass),                                                        &
               !  Crown area of an individual member of each mass cohort.
               !  (m2)
-CAI_intra_mass(mclass),                                                        &
-              !  Includes same-PFT overlap; excludes area under other PFTs.
-              !  (m2 m-2)
+plantNumDensity_intra(mclass),                                                 &
+              !  Density excluding other-PFT overlap, including same-PFT
+              !  overlap. (m-2 gridbox)
 frac_mass(mclass),                                                             &
               !  Exposed PFT fraction contributed by each mass class. (-)
 frac
@@ -975,9 +1026,6 @@ REAL                 :: canht_raw
               ! Sum of height weighted by exposed fraction (m)
 REAL                 :: lai_bal_raw
               ! Intra-PFT balanced leaf area per gridbox area (m2 m-2)
-REAL                 :: plantNumDensity_intra(mclass)
-              ! Density excluding other-PFT overlap, including same-PFT
-              ! overlap. (m-2 gridbox)
 
 !End of headers
 
@@ -992,16 +1040,12 @@ rootC_intra_raw   = 0.0
 woodC_intra_raw   = 0.0
 canht_raw         = 0.0
 lai_bal_raw       = 0.0
-plantNumDensity_intra(:) = 0.0
 
 DO k = 1, mclass
   vegCpft_raw   = vegCpft_raw   + plantNumDensity(k) * mass_cohort(k)
   leafC_raw     = leafC_raw     + plantNumDensity(k) * leaf_mass(k)
   rootC_raw     = rootC_raw     + plantNumDensity(k) * froot_mass(k)
   woodC_raw     = woodC_raw     + plantNumDensity(k) * wood_mass(k)
-  IF (CAI_intra_mass(k) > 0.0) THEN
-    plantNumDensity_intra(k) = CAI_intra_mass(k) / crwn_area_mass(k)
-  END IF
   canht_raw = canht_raw + frac_mass(k) * ht_mass(k)
   lai_bal_raw = lai_bal_raw + plantNumDensity_intra(k) *                       &
                 crwn_area_mass(k) * lai_bal_mass(k)
